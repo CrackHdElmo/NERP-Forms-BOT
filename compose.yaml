@@ -1,0 +1,10 @@
+services:
+  nerp-forms-bot:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Retains the local development database and any securely mounted Google credential file.
+      - ./data:/app/data
+      - ./secrets:/run/secrets:ro

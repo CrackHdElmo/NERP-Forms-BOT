@@ -1,0 +1,7 @@
+# Runtime dependencies for Wispbyte's Python server image.
+aiosqlite>=0.20,<1.0
+discord.py>=2.5,<3.0
+pydantic>=2.10,<3.0
+pydantic-settings>=2.7,<3.0
+PyYAML>=6.0,<7.0
+SQLAlchemy>=2.0,<3.0

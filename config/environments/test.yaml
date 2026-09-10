@@ -1,0 +1,52 @@
+# Altitude Government — test only. Discord IDs identify resources; they are not secrets.
+environment: test
+guild:
+  id: 1414109505394053132
+  name: Altitude Government
+
+channels:
+  service_desk: 1547670998382288967
+  docket_forum: 1547671517805154304
+  business_licensing_forum: 1547672422092640286
+
+categories:
+  court_administration: 1547667979204821093
+  off_docket_tickets: 1547691431185879180
+  attorney_request_tickets: 1547691504112373800
+  corporate_office: 1547668149024063528
+
+roles:
+  administrators:
+    - 1414109505805094938 # Mod (test server)
+  judges:
+    - 1547696460022423552 # Judge's Office
+  prosecutors:
+    - 1547696335925411962 # Prosecutor
+  defense_attorneys:
+    - 1547696091951010005 # Defense Attorney
+
+# This is an initial test participant, not an authorization bypass. Production requests
+# will identify the requester from each form submission's validated Discord user ID.
+test_requester_user_id: 581600460679544832
+
+workflows:
+  new_docket:
+    destination: docket_forum
+    mode: forum_post
+    initial_status: pending_review
+  existing_docket_filing:
+    destination: docket_forum
+    mode: existing_forum_post
+    initial_status: pending_review
+  off_docket_request:
+    destination: off_docket_tickets
+    mode: private_ticket_channel
+    initial_status: pending_review
+  attorney_request:
+    destination: attorney_request_tickets
+    mode: private_ticket_channel
+    initial_status: unassigned
+  business_license:
+    destination: business_licensing_forum
+    mode: forum_post
+    initial_status: pending_review

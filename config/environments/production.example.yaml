@@ -1,0 +1,42 @@
+# NERP DOJ production template. Do not add Discord or Google secrets here.
+# Populate guild/category/channel IDs only after the live server structure is approved.
+environment: production
+guild:
+  id: null
+  name: New Era RP DOJ
+
+channels:
+  service_desk: null
+  docket_forum: null
+  business_licensing_forum: null
+
+categories:
+  court_administration: null
+  off_docket_tickets: null
+  attorney_request_tickets: null
+  corporate_office: null
+
+roles:
+  district_attorneys_office: [1547647738022465596]
+  defense_attorneys: [1185753861403717693]
+  chief_of_defense: [1284705608574177280]
+  assistant_district_attorneys: [1479658687537614848]
+  prosecutors: [1177483804949098528]
+  lspd: [1177701402315862102]
+  lspd_high_command: [1180669630646321183]
+  lspd_chief: [1177490980652458045]
+  judges_office: [1518072238656454839]
+  senior_judges: [1479656354007224613]
+  high_command_doj: [1180669763106639872]
+  paralegals: [1501306329774686249]
+  attorney_general: [1347743186612916294]
+  business_owners: [1182075802809012316]
+  registered_jurors: [1479660603172716659]
+
+# Explicit authorization groups will be finalized before deploying live.
+authorization:
+  administrators: [high_command_doj]
+  judicial_approvers: [judges_office, senior_judges]
+  prosecution_reviewers: [district_attorneys_office, assistant_district_attorneys, prosecutors, paralegals]
+  defense_reviewers: [defense_attorneys, chief_of_defense, paralegals]
+  officer_submitters: [lspd, lspd_high_command, lspd_chief]
