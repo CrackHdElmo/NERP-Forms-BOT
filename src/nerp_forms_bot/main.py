@@ -34,22 +34,31 @@ class NerpFormsBot(discord.Client):
 
     async def setup_hook(self) -> None:
         guild = discord.Object(id=self.environment.guild.id)
-        self.tree.add_command(self.bot_status, guild=guild)
-        await self.tree.sync(guild=guild)
+        # Guild commands update immediately during development.  Clearing the scoped
+        # tree first also replaces any stale command schema that Discord retained
+        # from an earlier test run.
+        self.tree.clear_commands(guild=guild)
 
-    @app_commands.command(name="bot-status", description="Show the current NERP Forms BOT environment.")
-    async def bot_status(self, interaction: discord.Interaction) -> None:
-        if interaction.guild_id != self.environment.guild.id:
-            await interaction.response.send_message(
-                "This command is only configured for the selected NERP environment.", ephemeral=True
-            )
-            return
-
-        await interaction.response.send_message(
-            f"NERP Forms BOT is connected to **{self.environment.guild.name}** "
-            f"using the **{self.environment.environment}** configuration profile.",
-            ephemeral=True,
+        @self.tree.command(
+            name="bot-status",
+            description="Show the current NERP Forms BOT environment.",
+            guild=guild,
         )
+        async def bot_status(interaction: discord.Interaction) -> None:
+            if interaction.guild_id != self.environment.guild.id:
+                await interaction.response.send_message(
+                    "This command is only configured for the selected NERP environment.",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.response.send_message(
+                f"NERP Forms BOT is connected to **{self.environment.guild.name}** "
+                f"using the **{self.environment.environment}** configuration profile.",
+                ephemeral=True,
+            )
+
+        await self.tree.sync(guild=guild)
 
     async def on_ready(self) -> None:
         LOGGER.info("Connected as %s (%s)", self.user, self.user.id if self.user else "unknown")
