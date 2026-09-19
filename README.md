@@ -44,6 +44,7 @@ the Google integration and template decisions are configured.
 
 `Dockerfile` and `compose.yaml` provide a portable starting point for Wispbyte or another
 container-capable host. Supply environment variables through the host's protected settings.
-Do not bake credentials into the image, repository, or compose file.
+Do not bake credentials into the image, repository, or compose file. Wispbyte's Python
+main-file selector should use the repository-root `main.py` launcher.
 
 For Wispbyte's managed Python server image, follow [the Wispbyte deployment guide](docs/WISPBYTE_DEPLOYMENT.md).

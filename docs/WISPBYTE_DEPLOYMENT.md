@@ -27,17 +27,13 @@ or install the packages through the server console once:
 pip install -r requirements.txt
 ```
 
+Select the repository-root `main.py` when Wispbyte asks for the main file. It
+is a lightweight launcher that starts the packaged application under `src/`.
+
 Set the startup command to:
 
 ```text
-PYTHONPATH=src python -m nerp_forms_bot.main
-```
-
-If the panel does not accept the `PYTHONPATH=...` prefix, use its environment-variable
-section to set `PYTHONPATH` to `src`, then set the startup command to:
-
-```text
-python -m nerp_forms_bot.main
+python main.py
 ```
 
 ## 3. Set protected environment variables
