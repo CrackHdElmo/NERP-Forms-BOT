@@ -444,7 +444,9 @@ class NerpFormsBot(discord.Client):
             issue_date = datetime.now(UTC).strftime("%B %d, %Y").replace(" 0", " ")
             replacements.update(
                 {
-                    "{{APPROVER_NAME}}": f"/s/ {approver_name}",
+                    # The native template owns the literal "/s/" marker on its signature line
+                    # and uses this same placeholder again for the printed judicial name below it.
+                    "{{APPROVER_NAME}}": approver_name,
                     "{{ISSUE_DATE}}": issue_date,
                 }
             )
