@@ -266,24 +266,24 @@ class NerpFormsBot(discord.Client):
             )
 
         @self.tree.command(
-            name="add-court-order-member",
-            description="Give a server member access to this private Court Order ticket.",
+            name="add-ticket-member",
+            description="Give a server member access to this private NERP request ticket.",
             guild=guild,
         )
         @app_commands.describe(member="The server member who should be allowed into this ticket.")
-        async def add_court_order_member(
+        async def add_ticket_member(
             interaction: discord.Interaction,
             member: discord.Member,
         ) -> None:
             if not isinstance(interaction.channel, discord.TextChannel):
                 await interaction.response.send_message(
-                    "Run this command inside the private Court Order ticket.", ephemeral=True
+                    "Run this command inside a private NERP request ticket.", ephemeral=True
                 )
                 return
             submission = await self.store.get_by_channel_id(interaction.channel.id)
-            if not submission or submission.workflow != "court_order":
+            if not submission:
                 await interaction.response.send_message(
-                    "This channel is not a Court Order request ticket.", ephemeral=True
+                    "This channel is not a bot-managed private NERP request ticket.", ephemeral=True
                 )
                 return
             if not (
@@ -321,7 +321,8 @@ class NerpFormsBot(discord.Client):
                 return
 
             await interaction.channel.send(
-                f"{interaction.user.mention} granted {member.mention} access to this Court Order request."
+                f"{interaction.user.mention} granted {member.mention} access to "
+                f"NERP request **{submission.request_id}**."
             )
             await interaction.followup.send(
                 f"{member.mention} can now view, message, and attach files in {interaction.channel.mention}.",
