@@ -23,6 +23,10 @@ def _submission(payload: dict[str, str]) -> Submission:
         tracker_spreadsheet_id=None,
         tracker_row=None,
         claimed_user_id=2,
+        approved_by_user_id=None,
+        approved_by_name=None,
+        approved_at=None,
+        approved_document_id=None,
     )
 
 

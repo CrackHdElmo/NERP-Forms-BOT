@@ -22,6 +22,10 @@ class Submission:
     tracker_spreadsheet_id: str | None
     tracker_row: int | None
     claimed_user_id: int | None
+    approved_by_user_id: int | None
+    approved_by_name: str | None
+    approved_at: str | None
+    approved_document_id: str | None
 
 
 class SubmissionStore:
@@ -55,7 +59,22 @@ class SubmissionStore:
                 )
                 """
             )
+            await self._add_missing_columns(database)
             await database.commit()
+
+    @staticmethod
+    async def _add_missing_columns(database: aiosqlite.Connection) -> None:
+        """Apply additive migrations without disrupting existing test submissions."""
+        cursor = await database.execute("PRAGMA table_info(submissions)")
+        existing = {row[1] for row in await cursor.fetchall()}
+        for name, definition in (
+            ("approved_by_user_id", "INTEGER"),
+            ("approved_by_name", "TEXT"),
+            ("approved_at", "TEXT"),
+            ("approved_document_id", "TEXT"),
+        ):
+            if name not in existing:
+                await database.execute(f"ALTER TABLE submissions ADD COLUMN {name} {definition}")
 
     async def begin_submission(
         self,
@@ -95,6 +114,10 @@ class SubmissionStore:
                 tracker_spreadsheet_id=None,
                 tracker_row=None,
                 claimed_user_id=None,
+                approved_by_user_id=None,
+                approved_by_name=None,
+                approved_at=None,
+                approved_document_id=None,
             )
 
     async def record_baseline(
@@ -177,6 +200,39 @@ class SubmissionStore:
             row = await cursor.fetchone()
         return self._submission_from_row(row) if row else None
 
+    async def get_by_channel_id(self, channel_id: int) -> Submission | None:
+        """Find the one request the current private ticket represents."""
+        async with aiosqlite.connect(self.path) as database:
+            database.row_factory = aiosqlite.Row
+            cursor = await database.execute(
+                "SELECT * FROM submissions WHERE discord_channel_id = ?", (channel_id,)
+            )
+            row = await cursor.fetchone()
+        return self._submission_from_row(row) if row else None
+
+    async def mark_warrant_approved(
+        self,
+        *,
+        submission_id: int,
+        approver_user_id: int,
+        approver_name: str,
+        approved_at: str,
+        approved_document_id: str,
+    ) -> bool:
+        """Persist one approval audit record and reject a duplicate approval."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute(
+                """
+                UPDATE submissions
+                SET status = 'approved', approved_by_user_id = ?, approved_by_name = ?,
+                    approved_at = ?, approved_document_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status != 'approved'
+                """,
+                (approver_user_id, approver_name, approved_at, approved_document_id, submission_id),
+            )
+            await database.commit()
+        return cursor.rowcount == 1
+
     @staticmethod
     def _submission_from_row(row: aiosqlite.Row) -> Submission:
         return Submission(
@@ -191,4 +247,8 @@ class SubmissionStore:
             tracker_spreadsheet_id=row["tracker_spreadsheet_id"],
             tracker_row=row["tracker_row"],
             claimed_user_id=row["claimed_user_id"],
+            approved_by_user_id=row["approved_by_user_id"],
+            approved_by_name=row["approved_by_name"],
+            approved_at=row["approved_at"],
+            approved_document_id=row["approved_document_id"],
         )

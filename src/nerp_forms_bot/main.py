@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import UTC, datetime
 from io import BytesIO
 
 import discord
@@ -57,6 +58,16 @@ class NerpFormsBot(discord.Client):
             return True
         administrator_role_ids = set(self.environment.roles.get("administrators", []))
         return any(role.id in administrator_role_ids for role in member.roles)
+
+    def _can_approve_warrant(self, interaction: discord.Interaction) -> bool:
+        """Allow the configured judicial role; administrators remain a test-safe override."""
+        member = interaction.user
+        if not isinstance(member, discord.Member):
+            return False
+        judge_role_ids = set(self.environment.roles.get("judges", []))
+        return self._is_administrator(interaction) or any(
+            role.id in judge_role_ids for role in member.roles
+        )
 
     async def setup_hook(self) -> None:
         await self.store.initialize()
@@ -263,11 +274,6 @@ class NerpFormsBot(discord.Client):
             interaction: discord.Interaction,
             request_id: str,
         ) -> None:
-            if not self._is_administrator(interaction):
-                await interaction.response.send_message(
-                    "Only a configured bot administrator can generate a warrant.", ephemeral=True
-                )
-                return
             warrant_config = self.environment.court_order_warrant
             if not warrant_config or not self.settings.google_service_account_file:
                 await interaction.response.send_message(
@@ -280,9 +286,23 @@ class NerpFormsBot(discord.Client):
                     "That Court Order request could not be found.", ephemeral=True
                 )
                 return
+            if interaction.channel_id != submission.discord_channel_id:
+                await interaction.response.send_message(
+                    "Run this command inside the private ticket for that Court Order request.",
+                    ephemeral=True,
+                )
+                return
             if not submission.claimed_user_id:
                 await interaction.response.send_message(
                     "The requester must first verify ownership with `/claim-court-order`.",
+                    ephemeral=True,
+                )
+                return
+            if not (
+                self._is_administrator(interaction) or interaction.user.id == submission.claimed_user_id
+            ):
+                await interaction.response.send_message(
+                    "Only the verified requester or a configured bot administrator can generate this warrant.",
                     ephemeral=True,
                 )
                 return
@@ -367,6 +387,137 @@ class NerpFormsBot(discord.Client):
             )
             await interaction.followup.send(
                 f"Issued the one-page warrant in {channel.mention}.", ephemeral=True
+            )
+
+        @self.tree.command(
+            name="approve-arrest-warrant",
+            description="Judicially approve the Arrest Warrant in this private ticket.",
+            guild=guild,
+        )
+        async def approve_arrest_warrant(interaction: discord.Interaction) -> None:
+            if not self._can_approve_warrant(interaction):
+                await interaction.response.send_message(
+                    "Only a configured Judge or bot administrator can approve an Arrest Warrant.",
+                    ephemeral=True,
+                )
+                return
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.response.send_message(
+                    "Run this command inside the private Court Order ticket.", ephemeral=True
+                )
+                return
+            warrant_config = self.environment.court_order_warrant
+            if not warrant_config or not self.settings.google_service_account_file:
+                await interaction.response.send_message(
+                    "The Arrest Warrant template is not configured on this host yet.", ephemeral=True
+                )
+                return
+            submission = await self.store.get_by_channel_id(interaction.channel.id)
+            if not submission or submission.workflow != "court_order":
+                await interaction.response.send_message(
+                    "This channel is not a Court Order request ticket.", ephemeral=True
+                )
+                return
+            if not submission.claimed_user_id:
+                await interaction.response.send_message(
+                    "The requester must verify ownership before judicial approval.", ephemeral=True
+                )
+                return
+            if submission.status == "approved":
+                await interaction.response.send_message(
+                    "This Arrest Warrant has already been approved and cannot be approved twice.",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            replacements, validation_error = self._arrest_warrant_replacements(submission=submission)
+            if validation_error:
+                await self._notify_warrant_fit_failure(interaction.channel, submission, validation_error)
+                await interaction.followup.send(
+                    "No warrant was approved. The requester was notified in their private ticket.",
+                    ephemeral=True,
+                )
+                return
+            approver_name = interaction.user.display_name.strip() or interaction.user.name
+            approved_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+            issue_date = datetime.now(UTC).strftime("%B %d, %Y").replace(" 0", " ")
+            replacements.update(
+                {
+                    "{{APPROVER_NAME}}": f"/s/ {approver_name}",
+                    "{{ISSUE_DATE}}": issue_date,
+                }
+            )
+
+            try:
+                warrant = await asyncio.to_thread(
+                    GoogleWorkspaceService(
+                        self.settings.google_service_account_file,
+                        self.environment.google_workspace.test_drive_folder_id or "",
+                    ).generate_arrest_warrant,
+                    template_document_id=warrant_config.template_document_id,
+                    output_drive_folder_id=warrant_config.output_drive_folder_id,
+                    request_id=submission.request_id,
+                    replacements=replacements,
+                    document_title=f"Approved Arrest Warrant {submission.request_id}",
+                )
+            except Exception:
+                LOGGER.exception("Arrest Warrant approval generation failed for %s", submission.request_id)
+                await interaction.followup.send(
+                    "The approved warrant could not be generated. Check the Wispbyte console for the "
+                    "safe diagnostic message.",
+                    ephemeral=True,
+                )
+                return
+
+            if warrant.page_count != 1:
+                await self._notify_warrant_fit_failure(
+                    interaction.channel,
+                    submission,
+                    "the approved warrant would exceed the required one-page limit",
+                )
+                await interaction.followup.send(
+                    "No approved player-facing warrant was issued because the completed document "
+                    "is not exactly one page.",
+                    ephemeral=True,
+                )
+                return
+
+            filename = f"approved-arrest-warrant-{submission.request_id.lower()}.png"
+            fivemanage_url: str | None = None
+            if self.settings.fivemanage_api_token:
+                try:
+                    upload = await asyncio.to_thread(
+                        FiveManageService(
+                            self.settings.fivemanage_api_token,
+                            self.settings.fivemanage_storage_path,
+                        ).upload_png,
+                        filename=filename,
+                        content=warrant.png_bytes,
+                        request_id=submission.request_id,
+                    )
+                    fivemanage_url = upload.url
+                except Exception:
+                    LOGGER.exception("FiveManage upload failed for approved %s", submission.request_id)
+
+            await interaction.channel.send(
+                f"**Arrest Warrant approved** by {interaction.user.mention} on **{issue_date}**.\n"
+                f"Internal approved document: {warrant.document_url}"
+                + (f"\nFiveManage PNG URL: {fivemanage_url}" if fivemanage_url else ""),
+                file=discord.File(BytesIO(warrant.png_bytes), filename=filename),
+            )
+            recorded = await self.store.mark_warrant_approved(
+                submission_id=submission.id,
+                approver_user_id=interaction.user.id,
+                approver_name=approver_name,
+                approved_at=approved_at,
+                approved_document_id=warrant.document_id,
+            )
+            if not recorded:
+                LOGGER.warning("Approval was posted but audit record was already approved for %s", submission.request_id)
+            await interaction.followup.send(
+                f"Approved and posted the signed one-page warrant in {interaction.channel.mention}.",
+                ephemeral=True,
             )
 
         await self.tree.sync(guild=guild)

@@ -48,7 +48,8 @@ retry command. Set `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` to a larger value (for e
 `120`) in protected host settings when a slower polling interval is preferred.
 
 For a claimed Arrest Warrant request, a configured administrator can use
-`/generate-arrest-warrant` with the bot-issued request ID. The bot reads the submitted docket,
+`/generate-arrest-warrant` with the bot-issued request ID inside that request's private ticket.
+The verified requester and configured bot administrators can use it. The bot reads the submitted docket,
 classification, primary-case-officer, and law-enforcement-agency answers directly from the Court
 Order Form, then copies the approved Google Docs template into the protected
 Shared Drive, fills the request fields, exports a PDF, and verifies its page count before it
@@ -57,6 +58,11 @@ page; the PDF remains an internal validation artifact. If a charge is
 over 88 characters, the combined probable-cause statement is over 2,080 characters, or the
 completed PDF cannot fit on one page, the bot does not issue a warrant and advises the verified
 requester in the private Discord ticket. It never silently truncates the submitted information.
+
+Within that request's private ticket, a configured Judge or bot administrator can run
+`/approve-arrest-warrant`. The bot creates a separate approved document, replaces the approver
+and issue-date placeholders, records the approval as `/s/ Judge Name`, records the approver's
+Discord identity and UTC approval time, and prevents a second approval for the same request.
 
 When `FIVEMANAGE_API_TOKEN` is configured only in protected host settings, the bot also uploads
 the approved PNG to FiveManage and posts its returned CDN URL alongside the attached PNG. A

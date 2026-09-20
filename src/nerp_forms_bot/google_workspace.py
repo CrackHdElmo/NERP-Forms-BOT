@@ -229,6 +229,7 @@ class GoogleWorkspaceService:
         output_drive_folder_id: str,
         request_id: str,
         replacements: dict[str, str],
+        document_title: str | None = None,
     ) -> GeneratedWarrant:
         """Copy a native template, fill it, and render its single PDF page to PNG.
 
@@ -240,7 +241,7 @@ class GoogleWorkspaceService:
         copied = drive.files().copy(
             fileId=template_document_id,
             body={
-                "name": f"Arrest Warrant {request_id}",
+                "name": document_title or f"Arrest Warrant {request_id}",
                 "parents": [output_drive_folder_id],
             },
             fields="id, webViewLink",
