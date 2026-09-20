@@ -69,3 +69,30 @@ def test_warrant_replacements_reject_overlong_player_facing_text() -> None:
     _, error = _bot()._arrest_warrant_replacements(submission=_submission(payload))
 
     assert error == "subject 1's initial charges exceed the 88-character limit"
+
+
+def test_private_ticket_renders_each_submitted_subject() -> None:
+    payload = {
+        "Subject / Arrestee Name:": "Subject One",
+        "Subject / Arrestee Name: (2)": "Subject Two",
+        "Subject Citizen ID:": "1001",
+        "Subject Citizen ID: (2)": "1002",
+        "Initial Charges To Be Filed Against Subject:": "Charge one",
+        "Initial Charges To Be Filed Against Subject: (2)": "Charge two",
+        "Probable Cause For Arrest:": "Cause one",
+        "Probable Cause For Arrest: (2)": "Cause two",
+        "Please include any evidence": "https://example.test/evidence-one",
+        "Please include any evidence (2)": "https://example.test/evidence-two",
+    }
+
+    details = _bot()._court_order_subject_details(payload)
+
+    assert len(details) == 2
+    assert "Subject One" in details[0]
+    assert "Charge one" in details[0]
+    assert "Cause one" in details[0]
+    assert "evidence-one" in details[0]
+    assert "Subject Two" in details[1]
+    assert "Charge two" in details[1]
+    assert "Cause two" in details[1]
+    assert "evidence-two" in details[1]

@@ -204,29 +204,32 @@ class NerpFormsBot(discord.Client):
             guild=guild,
         )
         async def claim_court_order(interaction: discord.Interaction) -> None:
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.response.send_message(
+                    "Run this command inside the private Court Order ticket you want to claim.",
+                    ephemeral=True,
+                )
+                return
+            submission = await self.store.get_by_channel_id(interaction.channel.id)
+            if not submission or submission.workflow != "court_order":
+                await interaction.response.send_message(
+                    "This channel is not a Court Order request ticket.",
+                    ephemeral=True,
+                )
+                return
+            if submission.claimed_user_id:
+                await interaction.response.send_message(
+                    "This Court Order request has already been claimed.", ephemeral=True
+                )
+                return
             username = self._normalize_username(interaction.user.name)
-            matches = await self.store.find_claimable("court_order", username)
-            if not matches:
+            if username != self._normalize_username(submission.requester_username):
                 await interaction.response.send_message(
-                    "No unclaimed Court Order request matches your Discord username yet. "
-                    "Submit the form first, then allow up to a minute for DOJ to synchronize it.",
+                    "Your Discord username does not match the username submitted with this request.",
                     ephemeral=True,
                 )
                 return
-            if len(matches) > 1:
-                await interaction.response.send_message(
-                    "More than one unclaimed request matches your username. Please contact DOJ staff "
-                    "so they can link the correct request safely.",
-                    ephemeral=True,
-                )
-                return
-            submission = matches[0]
-            channel = self.get_channel(submission.discord_channel_id or 0)
-            if not isinstance(channel, discord.TextChannel):
-                await interaction.response.send_message(
-                    "Your request ticket could not be located. Please contact DOJ staff.", ephemeral=True
-                )
-                return
+            channel = interaction.channel
             await interaction.response.defer(ephemeral=True, thinking=True)
             try:
                 await channel.set_permissions(
@@ -670,15 +673,21 @@ class NerpFormsBot(discord.Client):
             ("Requesting agency", "Requesting Agency:"),
             ("Request type", "Request Type"),
             ("Existing docket", "Please indicate the Docket Name/ID."),
-            ("Subject", "Subject / Arrestee Name:"),
-            ("Initial charges", "Initial Charges To Be Filed Against Subject:"),
-            ("Probable cause", "Probable Cause For Arrest:"),
-            ("Evidence links", "Please include any evidence"),
         ):
             value = self._answer_prefix(submission.payload, field)
             if value:
                 embed.add_field(name=label, value=value[:1024], inline=False)
         await channel.send(embed=embed)
+        for number, details in enumerate(self._court_order_subject_details(submission.payload), start=1):
+            for part, chunk in enumerate(self._discord_text_chunks(details), start=1):
+                suffix = f" (continued {part})" if part > 1 else ""
+                await channel.send(
+                    embed=discord.Embed(
+                        title=f"Subject {number} details{suffix}",
+                        description=chunk,
+                        color=discord.Color.dark_blue(),
+                    )
+                )
         return channel
 
     def _arrest_warrant_replacements(
@@ -721,6 +730,8 @@ class NerpFormsBot(discord.Client):
                 submission.payload, "Law Enforcement Agency Assigned to Case:"
             ) or "N/A",
             "{{PROBABLE_CAUSE}}": probable_cause or "N/A",
+            "{{APPROVER_NAME}}": "Pending judicial approval",
+            "{{ISSUE_DATE}}": "Pending approval",
         }
         for number in range(1, 7):
             index = number - 1
@@ -748,6 +759,32 @@ class NerpFormsBot(discord.Client):
     @staticmethod
     def _value_at(values: list[str], index: int) -> str:
         return values[index] if index < len(values) and values[index] else "N/A"
+
+    def _court_order_subject_details(self, payload: dict[str, str]) -> list[str]:
+        """Render every submitted subject in the private intake ticket without omitting repeats."""
+        subjects = self._answers_for_prefix(payload, "Subject / Arrestee Name:")
+        citizen_ids = self._answers_for_prefix(payload, "Subject Citizen ID:")
+        charges = self._answers_for_prefix(payload, "Initial Charges To Be Filed Against Subject:")
+        probable_causes = self._answers_for_prefix(payload, "Probable Cause For Arrest:")
+        evidence_links = self._answers_for_prefix(payload, "Please include any evidence")
+        count = max([len(subjects), len(citizen_ids), len(charges), len(probable_causes), len(evidence_links)])
+        return [
+            "\n".join(
+                (
+                    f"**Name:** {self._value_at(subjects, index)}",
+                    f"**Citizen ID:** {self._value_at(citizen_ids, index)}",
+                    f"**Initial charges:** {self._value_at(charges, index)}",
+                    f"**Probable cause:** {self._value_at(probable_causes, index)}",
+                    f"**Evidence links:** {self._value_at(evidence_links, index)}",
+                )
+            )
+            for index in range(count)
+        ]
+
+    @staticmethod
+    def _discord_text_chunks(value: str, maximum_length: int = 3900) -> list[str]:
+        """Split long evidence/probable-cause details without silently truncating them."""
+        return [value[start : start + maximum_length] for start in range(0, len(value), maximum_length)]
 
     @staticmethod
     def _normalize_username(value: str) -> str:
