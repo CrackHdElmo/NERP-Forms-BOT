@@ -40,6 +40,10 @@ class NerpFormsBot(discord.Client):
         member = interaction.user
         if not isinstance(member, discord.Member):
             return False
+        if interaction.guild and interaction.guild.owner_id == member.id:
+            return True
+        if member.guild_permissions.administrator:
+            return True
         administrator_role_ids = set(self.environment.roles.get("administrators", []))
         return any(role.id in administrator_role_ids for role in member.roles)
 
