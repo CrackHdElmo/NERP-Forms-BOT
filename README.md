@@ -51,10 +51,15 @@ For a claimed Arrest Warrant request, a configured administrator can use
 `/generate-arrest-warrant` with the request ID and the staff-controlled docket, classification,
 and case-officer details. The bot copies the approved Google Docs template into the protected
 Shared Drive, fills the request fields, exports a PDF, and verifies its page count before it
-posts anything player-facing. It posts the PDF only when it is exactly one page. If a charge is
+posts anything player-facing. It posts a PNG rendering only when the source PDF is exactly one
+page; the PDF remains an internal validation artifact. If a charge is
 over 88 characters, the combined probable-cause statement is over 2,080 characters, or the
 completed PDF cannot fit on one page, the bot does not issue a warrant and advises the verified
 requester in the private Discord ticket. It never silently truncates the submitted information.
+
+When `FIVEMANAGE_API_TOKEN` is configured only in protected host settings, the bot also uploads
+the approved PNG to FiveManage and posts its returned CDN URL alongside the attached PNG. A
+FiveManage failure never prevents the verified PNG from being posted to the private ticket.
 
 ## Deployment
 

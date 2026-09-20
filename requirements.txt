@@ -7,4 +7,6 @@ pydantic>=2.10,<3.0
 pydantic-settings>=2.7,<3.0
 PyYAML>=6.0,<7.0
 pypdf>=5.0,<7.0
+PyMuPDF>=1.26,<2.0
+requests>=2.32,<3.0
 SQLAlchemy>=2.0,<3.0

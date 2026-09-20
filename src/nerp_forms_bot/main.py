@@ -12,6 +12,7 @@ from discord import app_commands
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .config import EnvironmentConfig, load_environment
+from .fivemanage import FiveManageService
 from .google_workspace import GoogleWorkspaceService, TrackingRow
 from .submission_store import Submission, SubmissionStore
 
@@ -28,6 +29,8 @@ class Settings(BaseSettings):
     google_service_account_file: str | None = None
     database_url: str = "sqlite+aiosqlite:///./data/nerp_forms_bot.db"
     google_forms_poll_interval_seconds: int = 60
+    fivemanage_api_token: str | None = None
+    fivemanage_storage_path: str = "nerp-doj/court-orders"
 
 
 class NerpFormsBot(discord.Client):
@@ -347,11 +350,34 @@ class NerpFormsBot(discord.Client):
                 )
                 return
 
-            filename = f"arrest-warrant-{submission.request_id.lower()}.pdf"
-            await channel.send(
+            filename = f"arrest-warrant-{submission.request_id.lower()}.png"
+            fivemanage_url: str | None = None
+            if self.settings.fivemanage_api_token:
+                try:
+                    upload = await asyncio.to_thread(
+                        FiveManageService(
+                            self.settings.fivemanage_api_token,
+                            self.settings.fivemanage_storage_path,
+                        ).upload_png,
+                        filename=filename,
+                        content=warrant.png_bytes,
+                        request_id=submission.request_id,
+                    )
+                    fivemanage_url = upload.url
+                except Exception:
+                    LOGGER.exception("FiveManage upload failed for %s", submission.request_id)
+
+            message = (
                 f"One-page Arrest Warrant generated for **{submission.request_id}**. "
-                f"Internal document record: {warrant.document_url}",
-                file=discord.File(BytesIO(warrant.pdf_bytes), filename=filename),
+                f"Internal document record: {warrant.document_url}"
+            )
+            if fivemanage_url:
+                message += f"\nFiveManage PNG URL: {fivemanage_url}"
+            elif self.settings.fivemanage_api_token:
+                message += "\nFiveManage upload was unavailable; the PNG is attached here."
+            await channel.send(
+                message,
+                file=discord.File(BytesIO(warrant.png_bytes), filename=filename),
             )
             await interaction.followup.send(
                 f"Issued the one-page warrant in {channel.mention}.", ephemeral=True

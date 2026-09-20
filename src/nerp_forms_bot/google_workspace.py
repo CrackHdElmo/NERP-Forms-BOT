@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
+import fitz
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -58,12 +59,13 @@ class TrackingRow:
 
 @dataclass(frozen=True)
 class GeneratedWarrant:
-    """An internal Google Doc draft and its player-facing PDF rendering."""
+    """An internal Google Doc draft and its verified player-facing PNG rendering."""
 
     document_id: str
     document_url: str
     pdf_bytes: bytes
     page_count: int
+    png_bytes: bytes
 
 
 class GoogleWorkspaceService:
@@ -228,10 +230,10 @@ class GoogleWorkspaceService:
         request_id: str,
         replacements: dict[str, str],
     ) -> GeneratedWarrant:
-        """Copy a native template, fill it, and measure the rendered PDF page count.
+        """Copy a native template, fill it, and render its single PDF page to PNG.
 
         The caller must treat any result other than exactly one page as an internal
-        draft only.  The method deliberately does not upload or share the PDF.
+        draft only. The method deliberately does not upload or share the PDF or PNG.
         """
         drive = self._drive_service()
         docs = build("docs", "v1", credentials=self._credentials(), cache_discovery=False)
@@ -268,12 +270,26 @@ class GoogleWorkspaceService:
         while not finished:
             _, finished = download.next_chunk()
         pdf_bytes = stream.getvalue()
+        page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
+        png_bytes = self._render_first_pdf_page_as_png(pdf_bytes) if page_count == 1 else b""
         return GeneratedWarrant(
             document_id=document_id,
             document_url=copied.get("webViewLink", f"https://docs.google.com/document/d/{document_id}/edit"),
             pdf_bytes=pdf_bytes,
-            page_count=len(PdfReader(BytesIO(pdf_bytes)).pages),
+            page_count=page_count,
+            png_bytes=png_bytes,
         )
+
+    @staticmethod
+    def _render_first_pdf_page_as_png(pdf_bytes: bytes) -> bytes:
+        """Rasterize at a legible resolution for FiveM and Discord consumption."""
+        document = fitz.open(stream=pdf_bytes, filetype="pdf")
+        try:
+            page = document.load_page(0)
+            rendered = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            return rendered.tobytes("png")
+        finally:
+            document.close()
 
     def _sheets_service(self):
         credentials = self._credentials()
