@@ -46,7 +46,15 @@ The bot also checks the linked response Sheet automatically every 60 seconds by 
 `/court-order-sync` remains available to administrators as an immediate reconciliation and
 retry command. Set `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` to a larger value (for example,
 `120`) in protected host settings when a slower polling interval is preferred.
-Document generation and approval actions will be added in subsequent milestones.
+
+For a claimed Arrest Warrant request, a configured administrator can use
+`/generate-arrest-warrant` with the request ID and the staff-controlled docket, classification,
+and case-officer details. The bot copies the approved Google Docs template into the protected
+Shared Drive, fills the request fields, exports a PDF, and verifies its page count before it
+posts anything player-facing. It posts the PDF only when it is exactly one page. If a charge is
+over 88 characters, the combined probable-cause statement is over 2,080 characters, or the
+completed PDF cannot fit on one page, the bot does not issue a warrant and advises the verified
+requester in the private Discord ticket. It never silently truncates the submitted information.
 
 ## Deployment
 

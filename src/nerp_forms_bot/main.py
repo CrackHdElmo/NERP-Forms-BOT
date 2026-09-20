@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from io import BytesIO
 
 import discord
 from discord import app_commands
@@ -247,6 +248,115 @@ class NerpFormsBot(discord.Client):
                 f"Your private Court Order request is ready: {channel.mention}", ephemeral=True
             )
 
+        @self.tree.command(
+            name="generate-arrest-warrant",
+            description="Create a one-page Arrest Warrant from a claimed Court Order request.",
+            guild=guild,
+        )
+        @app_commands.describe(
+            request_id="Court Order request ID, for example COR-000001.",
+            docket_id="The docket ID to print on the warrant.",
+            classified_designation="Classification to print on the warrant, or Unclassified.",
+            primary_case_officer="Primary case officer name and title.",
+            case_officer_agency="Agency responsible for the case officer.",
+        )
+        async def generate_arrest_warrant(
+            interaction: discord.Interaction,
+            request_id: str,
+            docket_id: str,
+            classified_designation: str,
+            primary_case_officer: str,
+            case_officer_agency: str,
+        ) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only a configured bot administrator can generate a warrant.", ephemeral=True
+                )
+                return
+            warrant_config = self.environment.court_order_warrant
+            if not warrant_config or not self.settings.google_service_account_file:
+                await interaction.response.send_message(
+                    "The Arrest Warrant template is not configured on this host yet.", ephemeral=True
+                )
+                return
+            submission = await self.store.get_by_request_id(request_id)
+            if not submission or submission.workflow != "court_order":
+                await interaction.response.send_message(
+                    "That Court Order request could not be found.", ephemeral=True
+                )
+                return
+            if not submission.claimed_user_id:
+                await interaction.response.send_message(
+                    "The requester must first verify ownership with `/claim-court-order`.",
+                    ephemeral=True,
+                )
+                return
+            channel = self.get_channel(submission.discord_channel_id or 0)
+            if not isinstance(channel, discord.TextChannel):
+                await interaction.response.send_message(
+                    "The private request ticket could not be located.", ephemeral=True
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            replacements, validation_error = self._arrest_warrant_replacements(
+                submission=submission,
+                docket_id=docket_id,
+                classified_designation=classified_designation,
+                primary_case_officer=primary_case_officer,
+                case_officer_agency=case_officer_agency,
+            )
+            if validation_error:
+                await self._notify_warrant_fit_failure(channel, submission, validation_error)
+                await interaction.followup.send(
+                    "No warrant was issued. The requester was notified in their private ticket.",
+                    ephemeral=True,
+                )
+                return
+
+            try:
+                warrant = await asyncio.to_thread(
+                    GoogleWorkspaceService(
+                        self.settings.google_service_account_file,
+                        self.environment.google_workspace.test_drive_folder_id or "",
+                    ).generate_arrest_warrant,
+                    template_document_id=warrant_config.template_document_id,
+                    output_drive_folder_id=warrant_config.output_drive_folder_id,
+                    request_id=submission.request_id,
+                    replacements=replacements,
+                )
+            except Exception:
+                LOGGER.exception("Arrest Warrant generation failed for %s", submission.request_id)
+                await interaction.followup.send(
+                    "The warrant could not be generated. Check the Wispbyte console for the safe "
+                    "diagnostic message.",
+                    ephemeral=True,
+                )
+                return
+
+            if warrant.page_count != 1:
+                await self._notify_warrant_fit_failure(
+                    channel,
+                    submission,
+                    "the completed warrant would exceed the required one-page limit",
+                )
+                await interaction.followup.send(
+                    "No player-facing warrant was issued because the completed document is not "
+                    "exactly one page. The requester was notified in their private ticket.",
+                    ephemeral=True,
+                )
+                return
+
+            filename = f"arrest-warrant-{submission.request_id.lower()}.pdf"
+            await channel.send(
+                f"One-page Arrest Warrant generated for **{submission.request_id}**. "
+                f"Internal document record: {warrant.document_url}",
+                file=discord.File(BytesIO(warrant.pdf_bytes), filename=filename),
+            )
+            await interaction.followup.send(
+                f"Issued the one-page warrant in {channel.mention}.", ephemeral=True
+            )
+
         await self.tree.sync(guild=guild)
         self._court_order_poll_task = asyncio.create_task(self._court_order_poll_loop())
 
@@ -405,6 +515,66 @@ class NerpFormsBot(discord.Client):
                 embed.add_field(name=label, value=value[:1024], inline=False)
         await channel.send(embed=embed)
         return channel
+
+    def _arrest_warrant_replacements(
+        self,
+        *,
+        submission: Submission,
+        docket_id: str,
+        classified_designation: str,
+        primary_case_officer: str,
+        case_officer_agency: str,
+    ) -> tuple[dict[str, str], str | None]:
+        """Build template text without silently truncating player-facing facts."""
+        subjects = self._answers_for_prefix(submission.payload, "Subject / Arrestee Name:")
+        citizen_ids = self._answers_for_prefix(submission.payload, "Subject Citizen ID:")
+        charges = self._answers_for_prefix(
+            submission.payload, "Initial Charges To Be Filed Against Subject:"
+        )
+        probable_causes = self._answers_for_prefix(submission.payload, "Probable Cause For Arrest:")
+        for number, charge in enumerate(charges, start=1):
+            if len(charge) > 88:
+                return {}, f"subject {number}'s initial charges exceed the 88-character limit"
+        probable_cause = "\n\n".join(probable_causes)
+        if len(probable_cause) > 2080:
+            return {}, "the probable-cause statement exceeds the 2,080-character limit"
+
+        replacements = {
+            "{{REQUEST_ID}}": submission.request_id,
+            "{{DOCKET_ID}}": docket_id.strip() or "N/A",
+            "{{CLASSIFIED}}": classified_designation.strip() or "Unclassified",
+            "{{REQUESTER_NAME}}": self._answer(submission.payload, "Requestors Name:") or "N/A",
+            "{{REQUESTING_AGENCY}}": self._answer(submission.payload, "Requesting Agency:") or "N/A",
+            "{{PCO}}": primary_case_officer.strip() or "N/A",
+            "{{CASE_OFFICER_AGENCY}}": case_officer_agency.strip() or "N/A",
+            "{{PROBABLE_CAUSE}}": probable_cause or "N/A",
+        }
+        for number in range(1, 7):
+            index = number - 1
+            replacements[f"{{{{SUBJECT_{number}_NAME}}}}"] = self._value_at(subjects, index)
+            replacements[f"{{{{S{number}ID}}}}"] = self._value_at(citizen_ids, index)
+            replacements[f"{{{{SUBJECT_{number}_INITIAL_CHARGES}}}}"] = self._value_at(charges, index)
+        return replacements, None
+
+    async def _notify_warrant_fit_failure(
+        self, channel: discord.TextChannel, submission: Submission, reason: str
+    ) -> None:
+        """Tell the verified requester why no player-facing warrant was issued."""
+        requester = channel.guild.get_member(submission.claimed_user_id or 0)
+        mention = requester.mention if requester else "The verified requester"
+        await channel.send(
+            f"{mention}, no player-facing Arrest Warrant was issued for **{submission.request_id}** "
+            f"because {reason}. Please shorten or revise the relevant information with DOJ staff, "
+            "then request a new warrant generation. Your information was not silently truncated."
+        )
+
+    @staticmethod
+    def _answers_for_prefix(payload: dict[str, str], prefix: str) -> list[str]:
+        return [value for name, value in payload.items() if name.startswith(prefix) and value]
+
+    @staticmethod
+    def _value_at(values: list[str], index: int) -> str:
+        return values[index] if index < len(values) and values[index] else "N/A"
 
     @staticmethod
     def _normalize_username(value: str) -> str:

@@ -42,6 +42,15 @@ class CourtOrderIntakeConfig(BaseModel):
     response_sheet_name: str
 
 
+class CourtOrderWarrantConfig(BaseModel):
+    """Google Docs resources used to create the player-facing Arrest Warrant."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    template_document_id: str
+    output_drive_folder_id: str
+
+
 class EnvironmentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -53,6 +62,7 @@ class EnvironmentConfig(BaseModel):
     workflows: dict[str, WorkflowConfig] = Field(default_factory=dict)
     google_workspace: GoogleWorkspaceConfig = Field(default_factory=GoogleWorkspaceConfig)
     court_order_intake: CourtOrderIntakeConfig | None = None
+    court_order_warrant: CourtOrderWarrantConfig | None = None
     test_requester_user_id: int | None = None
 
 

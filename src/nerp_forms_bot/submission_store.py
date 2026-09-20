@@ -21,6 +21,7 @@ class Submission:
     discord_channel_id: int | None
     tracker_spreadsheet_id: str | None
     tracker_row: int | None
+    claimed_user_id: int | None
 
 
 class SubmissionStore:
@@ -93,6 +94,7 @@ class SubmissionStore:
                 discord_channel_id=None,
                 tracker_spreadsheet_id=None,
                 tracker_row=None,
+                claimed_user_id=None,
             )
 
     async def record_baseline(
@@ -165,6 +167,16 @@ class SubmissionStore:
             )
             await database.commit()
 
+    async def get_by_request_id(self, request_id: str) -> Submission | None:
+        """Return one submission so staff commands cannot act on an arbitrary ticket."""
+        async with aiosqlite.connect(self.path) as database:
+            database.row_factory = aiosqlite.Row
+            cursor = await database.execute(
+                "SELECT * FROM submissions WHERE request_id = ?", (request_id.upper(),)
+            )
+            row = await cursor.fetchone()
+        return self._submission_from_row(row) if row else None
+
     @staticmethod
     def _submission_from_row(row: aiosqlite.Row) -> Submission:
         return Submission(
@@ -178,4 +190,5 @@ class SubmissionStore:
             discord_channel_id=row["discord_channel_id"],
             tracker_spreadsheet_id=row["tracker_spreadsheet_id"],
             tracker_row=row["tracker_row"],
+            claimed_user_id=row["claimed_user_id"],
         )
