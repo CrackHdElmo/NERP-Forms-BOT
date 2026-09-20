@@ -11,4 +11,4 @@ def test_altitude_government_profile_loads() -> None:
     assert config.channels["docket_forum"] == 1547671517805154304
     assert config.categories["off_docket_tickets"] == 1547691431185879180
     assert config.workflows["attorney_request"].mode == "private_ticket_channel"
-    assert config.google_workspace.test_drive_folder_id == "1gctW_g43-zsMpdvVehlI146M27-YPjmi"
+    assert config.google_workspace.test_drive_folder_id == "1tSB26NtY7wX5I0yRhUfVrRXj0B3ADItb"

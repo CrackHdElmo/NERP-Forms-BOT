@@ -16,8 +16,8 @@ categories:
   corporate_office: 1547668149024063528
 
 google_workspace:
-  # This folder was shared directly with the test service account. It is not a secret.
-  test_drive_folder_id: 1gctW_g43-zsMpdvVehlI146M27-YPjmi
+  # This folder is inside the NERP DOJ BOT - Test Shared drive and is not a secret.
+  test_drive_folder_id: 1tSB26NtY7wX5I0yRhUfVrRXj0B3ADItb
 
 roles:
   administrators:
