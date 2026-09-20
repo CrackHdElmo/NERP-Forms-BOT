@@ -48,8 +48,9 @@ retry command. Set `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` to a larger value (for e
 `120`) in protected host settings when a slower polling interval is preferred.
 
 For a claimed Arrest Warrant request, a configured administrator can use
-`/generate-arrest-warrant` with the request ID and the staff-controlled docket, classification,
-and case-officer details. The bot copies the approved Google Docs template into the protected
+`/generate-arrest-warrant` with the bot-issued request ID. The bot reads the submitted docket,
+classification, primary-case-officer, and law-enforcement-agency answers directly from the Court
+Order Form, then copies the approved Google Docs template into the protected
 Shared Drive, fills the request fields, exports a PDF, and verifies its page count before it
 posts anything player-facing. It posts a PNG rendering only when the source PDF is exactly one
 page; the PDF remains an internal validation artifact. If a charge is

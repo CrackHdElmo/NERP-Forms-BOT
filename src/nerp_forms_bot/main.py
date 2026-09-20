@@ -258,18 +258,10 @@ class NerpFormsBot(discord.Client):
         )
         @app_commands.describe(
             request_id="Court Order request ID, for example COR-000001.",
-            docket_id="The docket ID to print on the warrant.",
-            classified_designation="Classification to print on the warrant, or Unclassified.",
-            primary_case_officer="Primary case officer name and title.",
-            case_officer_agency="Agency responsible for the case officer.",
         )
         async def generate_arrest_warrant(
             interaction: discord.Interaction,
             request_id: str,
-            docket_id: str,
-            classified_designation: str,
-            primary_case_officer: str,
-            case_officer_agency: str,
         ) -> None:
             if not self._is_administrator(interaction):
                 await interaction.response.send_message(
@@ -302,13 +294,7 @@ class NerpFormsBot(discord.Client):
                 return
 
             await interaction.response.defer(ephemeral=True, thinking=True)
-            replacements, validation_error = self._arrest_warrant_replacements(
-                submission=submission,
-                docket_id=docket_id,
-                classified_designation=classified_designation,
-                primary_case_officer=primary_case_officer,
-                case_officer_agency=case_officer_agency,
-            )
+            replacements, validation_error = self._arrest_warrant_replacements(submission=submission)
             if validation_error:
                 await self._notify_warrant_fit_failure(channel, submission, validation_error)
                 await interaction.followup.send(
@@ -546,12 +532,8 @@ class NerpFormsBot(discord.Client):
         self,
         *,
         submission: Submission,
-        docket_id: str,
-        classified_designation: str,
-        primary_case_officer: str,
-        case_officer_agency: str,
     ) -> tuple[dict[str, str], str | None]:
-        """Build template text without silently truncating player-facing facts."""
+        """Build template text from the Court Order Form without truncating facts."""
         subjects = self._answers_for_prefix(submission.payload, "Subject / Arrestee Name:")
         citizen_ids = self._answers_for_prefix(submission.payload, "Subject Citizen ID:")
         charges = self._answers_for_prefix(
@@ -565,14 +547,26 @@ class NerpFormsBot(discord.Client):
         if len(probable_cause) > 2080:
             return {}, "the probable-cause statement exceeds the 2,080-character limit"
 
+        classified_answer = self._answer_prefix(
+            submission.payload,
+            'Has the Case or it\'s evidence been designated "Classified"',
+        )
+        classified_designation = (
+            "Classified" if classified_answer.strip().lower() in {"yes", "y"} else "Unclassified"
+        )
+
         replacements = {
             "{{REQUEST_ID}}": submission.request_id,
-            "{{DOCKET_ID}}": docket_id.strip() or "N/A",
-            "{{CLASSIFIED}}": classified_designation.strip() or "Unclassified",
+            "{{DOCKET_ID}}": self._answer(
+                submission.payload, "Please indicate the Docket Name/ID."
+            ) or "N/A",
+            "{{CLASSIFIED}}": classified_designation,
             "{{REQUESTER_NAME}}": self._answer(submission.payload, "Requestors Name:") or "N/A",
             "{{REQUESTING_AGENCY}}": self._answer(submission.payload, "Requesting Agency:") or "N/A",
-            "{{PCO}}": primary_case_officer.strip() or "N/A",
-            "{{CASE_OFFICER_AGENCY}}": case_officer_agency.strip() or "N/A",
+            "{{PCO}}": self._answer(submission.payload, "Primary Case Officer") or "N/A",
+            "{{CASE_OFFICER_AGENCY}}": self._answer(
+                submission.payload, "Law Enforcement Agency Assigned to Case:"
+            ) or "N/A",
             "{{PROBABLE_CAUSE}}": probable_cause or "N/A",
         }
         for number in range(1, 7):

@@ -37,14 +37,12 @@ def test_warrant_replacements_keep_six_subjects_distinct() -> None:
         "Initial Charges To Be Filed Against Subject:": "Charge one",
         "Initial Charges To Be Filed Against Subject: (2)": "Charge two",
         "Probable Cause For Arrest:": "A concise probable-cause statement.",
+        "Please indicate the Docket Name/ID.": "D-42",
+        'Has the Case or it\'s evidence been designated "Classified" by The Commissioner\'s Officer or FIB? ': "No",
+        "Primary Case Officer": "Officer Example",
+        "Law Enforcement Agency Assigned to Case:": "LSPD",
     }
-    replacements, error = _bot()._arrest_warrant_replacements(
-        submission=_submission(payload),
-        docket_id="D-42",
-        classified_designation="Unclassified",
-        primary_case_officer="Officer Example",
-        case_officer_agency="LSPD",
-    )
+    replacements, error = _bot()._arrest_warrant_replacements(submission=_submission(payload))
 
     assert error is None
     assert replacements["{{SUBJECT_1_NAME}}"] == "Subject One"
@@ -52,6 +50,10 @@ def test_warrant_replacements_keep_six_subjects_distinct() -> None:
     assert replacements["{{S1ID}}"] == "1001"
     assert replacements["{{S2ID}}"] == "1002"
     assert replacements["{{SUBJECT_6_NAME}}"] == "N/A"
+    assert replacements["{{DOCKET_ID}}"] == "D-42"
+    assert replacements["{{CLASSIFIED}}"] == "Unclassified"
+    assert replacements["{{PCO}}"] == "Officer Example"
+    assert replacements["{{CASE_OFFICER_AGENCY}}"] == "LSPD"
     assert "{{EVIDENCE_LINKS}}" not in replacements
 
 
@@ -60,12 +62,6 @@ def test_warrant_replacements_reject_overlong_player_facing_text() -> None:
         "Initial Charges To Be Filed Against Subject:": "x" * 89,
         "Probable Cause For Arrest:": "A valid statement.",
     }
-    _, error = _bot()._arrest_warrant_replacements(
-        submission=_submission(payload),
-        docket_id="D-42",
-        classified_designation="Unclassified",
-        primary_case_officer="Officer Example",
-        case_officer_agency="LSPD",
-    )
+    _, error = _bot()._arrest_warrant_replacements(submission=_submission(payload))
 
     assert error == "subject 1's initial charges exceed the 88-character limit"
