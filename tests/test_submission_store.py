@@ -39,3 +39,44 @@ def test_warrant_approval_is_recorded_once(tmp_path) -> None:
     assert saved.approved_by_user_id == 42
     assert saved.approved_by_name == "Judge Example"
     assert saved.approved_document_id == "approved-document-id"
+
+
+def test_closure_is_recorded_once_and_resource_channel_is_reused(tmp_path) -> None:
+    async def exercise() -> tuple[bool, bool, object, int | None]:
+        store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
+        await store.initialize()
+        submission = await store.begin_submission(
+            source_key="sheet:3",
+            workflow="court_order",
+            requester_username="requester",
+            payload={"Request Type": "Arrest Warrant"},
+        )
+        assert submission is not None
+        first = await store.mark_closed(
+            submission_id=submission.id,
+            closer_user_id=42,
+            closer_name="Judge Example",
+            closed_at="2026-09-20T15:00:00+00:00",
+            closed_note="Approved and concluded.",
+        )
+        second = await store.mark_closed(
+            submission_id=submission.id,
+            closer_user_id=43,
+            closer_name="Another Closer",
+            closed_at="2026-09-20T15:01:00+00:00",
+            closed_note=None,
+        )
+        await store.set_resource_channel_id("doj_case_records", 1234)
+        saved = await store.get_by_request_id(submission.request_id)
+        resource_id = await store.get_resource_channel_id("doj_case_records")
+        return first, second, saved, resource_id
+
+    first, second, saved, resource_id = asyncio.run(exercise())
+
+    assert first is True
+    assert second is False
+    assert saved is not None
+    assert saved.status == "closed"
+    assert saved.closed_by_user_id == 42
+    assert saved.closed_note == "Approved and concluded."
+    assert resource_id == 1234

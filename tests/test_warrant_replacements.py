@@ -27,6 +27,10 @@ def _submission(payload: dict[str, str]) -> Submission:
         approved_by_name=None,
         approved_at=None,
         approved_document_id=None,
+        closed_by_user_id=None,
+        closed_by_name=None,
+        closed_at=None,
+        closed_note=None,
     )
 
 

@@ -69,6 +69,49 @@ class NerpFormsBot(discord.Client):
             role.id in judge_role_ids for role in member.roles
         )
 
+    def _role_ids(self, *role_groups: str) -> set[int]:
+        """Resolve configured role groups while allowing test and production aliases."""
+        return {
+            role_id
+            for role_group in role_groups
+            for role_id in self.environment.roles.get(role_group, [])
+        }
+
+    def _can_close_ticket(self, interaction: discord.Interaction, submission: Submission) -> bool:
+        """Allow the requester, judicial/AG staff, or a server administrator to close a request."""
+        member = interaction.user
+        if not isinstance(member, discord.Member):
+            return False
+        if self._is_administrator(interaction) or member.id == submission.claimed_user_id:
+            return True
+        closer_role_ids = self._role_ids(
+            "judges",
+            "judges_office",
+            "senior_judges",
+            "attorney_general",
+        )
+        return any(role.id in closer_role_ids for role in member.roles)
+
+    def _case_record_viewer_role_ids(self) -> set[int]:
+        """Return DOJ and PD staff roles that may read the permanent records channel."""
+        return self._role_ids(
+            "administrators",
+            "district_attorneys_office",
+            "defense_attorneys",
+            "chief_of_defense",
+            "assistant_district_attorneys",
+            "prosecutors",
+            "lspd",
+            "lspd_high_command",
+            "lspd_chief",
+            "judges",
+            "judges_office",
+            "senior_judges",
+            "high_command_doj",
+            "paralegals",
+            "attorney_general",
+        )
+
     async def setup_hook(self) -> None:
         await self.store.initialize()
         guild = discord.Object(id=self.environment.guild.id)
@@ -326,6 +369,102 @@ class NerpFormsBot(discord.Client):
             )
             await interaction.followup.send(
                 f"{member.mention} can now view, message, and attach files in {interaction.channel.mention}.",
+                ephemeral=True,
+            )
+
+        @self.tree.command(
+            name="close-ticket",
+            description="Close this NERP request and add a staff-only case record.",
+            guild=guild,
+        )
+        @app_commands.describe(
+            closure_note="Optional short disposition or closing note for the staff case record."
+        )
+        async def close_ticket(
+            interaction: discord.Interaction,
+            closure_note: str | None = None,
+        ) -> None:
+            if not isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
+                await interaction.response.send_message(
+                    "Run this command inside a bot-managed NERP request ticket or Forum post.",
+                    ephemeral=True,
+                )
+                return
+            submission = await self.store.get_by_channel_id(interaction.channel.id)
+            if not submission:
+                await interaction.response.send_message(
+                    "This channel is not a bot-managed NERP request ticket or Forum post.",
+                    ephemeral=True,
+                )
+                return
+            if submission.status == "closed":
+                await interaction.response.send_message(
+                    "This request is already closed.", ephemeral=True
+                )
+                return
+            if not self._can_close_ticket(interaction, submission):
+                await interaction.response.send_message(
+                    "Only the verified requester, a configured Judge, the Attorney General, or a "
+                    "server administrator can close this request.",
+                    ephemeral=True,
+                )
+                return
+            if closure_note and len(closure_note) > 1000:
+                await interaction.response.send_message(
+                    "The optional closure note must be 1,000 characters or fewer.", ephemeral=True
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            closer_name = interaction.user.display_name.strip() or interaction.user.name
+            closed_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+            try:
+                records_channel = await self._get_or_create_case_records_channel()
+                await records_channel.send(
+                    embed=self._case_record_embed(
+                        submission=submission,
+                        closed_by=interaction.user,
+                        closed_at=closed_at,
+                        closure_note=closure_note,
+                    )
+                )
+                await self._close_request_channel(interaction.channel, submission, closed_at)
+                recorded = await self.store.mark_closed(
+                    submission_id=submission.id,
+                    closer_user_id=interaction.user.id,
+                    closer_name=closer_name,
+                    closed_at=closed_at,
+                    closed_note=closure_note,
+                )
+            except discord.Forbidden:
+                LOGGER.warning("The bot lacks permission to close request %s", submission.request_id)
+                await interaction.followup.send(
+                    "The bot lacks a required Discord permission to create the staff record or close "
+                    "this request. Confirm its role has **Manage Channels**, **Manage Roles**, and "
+                    "**Manage Threads** permissions, then retry.",
+                    ephemeral=True,
+                )
+                return
+            except Exception:
+                LOGGER.exception("Ticket closure failed for %s", submission.request_id)
+                await interaction.followup.send(
+                    "The request could not be closed. Check the Wispbyte console for the safe "
+                    "diagnostic message.",
+                    ephemeral=True,
+                )
+                return
+
+            if not recorded:
+                LOGGER.warning("Closure record already exists for %s", submission.request_id)
+                await interaction.followup.send(
+                    "A case record was posted, but this request had already been marked closed. "
+                    "Please have DOJ staff review the records channel.",
+                    ephemeral=True,
+                )
+                return
+            await interaction.followup.send(
+                f"Closed **{submission.request_id}** and posted its staff record in "
+                f"{records_channel.mention}.",
                 ephemeral=True,
             )
 
@@ -687,6 +826,148 @@ class NerpFormsBot(discord.Client):
             intake.response_sheet_name,
         )
         return workspace, rows
+
+    async def _get_or_create_case_records_channel(self) -> discord.TextChannel:
+        """Lazily create the permanent DOJ/PD-only records channel on first closure."""
+        guild = self.get_guild(self.environment.guild.id)
+        category_id = self.environment.categories.get("court_administration")
+        category = guild.get_channel(category_id) if guild and category_id else None
+        if not guild or not isinstance(category, discord.CategoryChannel):
+            raise RuntimeError("The Court Administration category is not configured correctly.")
+
+        stored_channel_id = await self.store.get_resource_channel_id("doj_case_records")
+        stored_channel = guild.get_channel(stored_channel_id) if stored_channel_id else None
+        if isinstance(stored_channel, discord.TextChannel):
+            return stored_channel
+
+        existing = discord.utils.get(category.text_channels, name="doj-case-records")
+        if isinstance(existing, discord.TextChannel):
+            await self.store.set_resource_channel_id("doj_case_records", existing.id)
+            return existing
+
+        me = guild.me
+        if not me:
+            raise RuntimeError("The bot member was not available in the configured guild.")
+        overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            me: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                attach_files=True,
+                manage_messages=True,
+            ),
+        }
+        for role_id in self._case_record_viewer_role_ids():
+            role = guild.get_role(role_id)
+            if role:
+                overwrites[role] = discord.PermissionOverwrite(
+                    view_channel=True,
+                    read_message_history=True,
+                    send_messages=False,
+                    attach_files=False,
+                    embed_links=True,
+                )
+        channel = await guild.create_text_channel(
+            name="doj-case-records",
+            category=category,
+            topic="NERP Forms BOT permanent DOJ/PD case and request closure records.",
+            overwrites=overwrites,
+            reason="NERP Forms BOT first request closure",
+        )
+        await self.store.set_resource_channel_id("doj_case_records", channel.id)
+        return channel
+
+    def _case_record_embed(
+        self,
+        *,
+        submission: Submission,
+        closed_by: discord.abc.User,
+        closed_at: str,
+        closure_note: str | None,
+    ) -> discord.Embed:
+        """Create a staff-only synopsis without copying private ticket evidence into the record."""
+        classified_answer = self._answer_prefix(
+            submission.payload,
+            'Has the Case or it\'s evidence been designated "Classified"',
+        )
+        classified = "Classified" if classified_answer.lower() in {"yes", "y"} else "Unclassified"
+        subjects = self._answers_for_prefix(submission.payload, "Subject / Arrestee Name:")
+        citizen_ids = self._answers_for_prefix(submission.payload, "Subject Citizen ID:")
+        charges = self._answers_for_prefix(
+            submission.payload, "Initial Charges To Be Filed Against Subject:"
+        )
+        subject_lines = [
+            f"{number}. {self._value_at(subjects, number - 1)} "
+            f"({self._value_at(citizen_ids, number - 1)}) — "
+            f"{self._value_at(charges, number - 1)}"
+            for number in range(1, max(len(subjects), len(citizen_ids), len(charges)) + 1)
+        ]
+        embed = discord.Embed(
+            title=f"Closed {submission.workflow.replace('_', ' ').title()} — {submission.request_id}",
+            description="Permanent staff case record. Detailed evidence and attachments remain in the "
+            "closed source request.",
+            color=discord.Color.dark_grey(),
+            timestamp=datetime.fromisoformat(closed_at),
+        )
+        embed.add_field(
+            name="Request",
+            value=(
+                f"**Type:** {self._answer(submission.payload, 'Request Type') or submission.workflow}\n"
+                f"**Requester:** {self._answer(submission.payload, 'Requestors Name:') or 'N/A'}\n"
+                f"**Agency:** {self._answer(submission.payload, 'Requesting Agency:') or 'N/A'}\n"
+                f"**Docket:** {self._answer(submission.payload, 'Please indicate the Docket Name/ID.') or 'N/A'}"
+            ),
+            inline=False,
+        )
+        embed.add_field(name="Classification", value=classified, inline=True)
+        embed.add_field(
+            name="Status at closure", value=submission.status.replace("_", " ").title(), inline=True
+        )
+        embed.add_field(name="Closed by", value=closed_by.mention, inline=True)
+        if subject_lines:
+            embed.add_field(name="Subjects", value="\n".join(subject_lines)[:1024], inline=False)
+        if closure_note:
+            embed.add_field(name="Closure note", value=closure_note, inline=False)
+        if submission.discord_channel_id:
+            embed.add_field(
+                name="Source request", value=f"<#{submission.discord_channel_id}>", inline=False
+            )
+        embed.set_footer(text=f"Closed at {closed_at}")
+        return embed
+
+    async def _close_request_channel(
+        self,
+        channel: discord.TextChannel | discord.Thread,
+        submission: Submission,
+        closed_at: str,
+    ) -> None:
+        """Lock a private ticket or archive a Forum post after its staff record is written."""
+        if isinstance(channel, discord.Thread):
+            await channel.edit(
+                archived=True,
+                locked=True,
+                reason=f"NERP Forms BOT closed request {submission.request_id}",
+            )
+            return
+
+        me = channel.guild.me
+        for target in channel.overwrites:
+            if isinstance(target, discord.Member) and (not me or target.id != me.id):
+                await channel.set_permissions(
+                    target,
+                    view_channel=True,
+                    send_messages=False,
+                    attach_files=False,
+                    embed_links=False,
+                )
+        await channel.edit(
+            topic=f"Closed NERP request {submission.request_id} at {closed_at}.",
+            reason=f"NERP Forms BOT closed request {submission.request_id}",
+        )
+        await channel.send(
+            "This request is closed. A staff case record was posted to **#doj-case-records**."
+        )
 
     async def _create_court_order_ticket(self, submission: Submission) -> discord.TextChannel:
         guild = self.get_guild(self.environment.guild.id)

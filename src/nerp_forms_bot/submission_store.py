@@ -26,6 +26,10 @@ class Submission:
     approved_by_name: str | None
     approved_at: str | None
     approved_document_id: str | None
+    closed_by_user_id: int | None
+    closed_by_name: str | None
+    closed_at: str | None
+    closed_note: str | None
 
 
 class SubmissionStore:
@@ -59,6 +63,14 @@ class SubmissionStore:
                 )
                 """
             )
+            await database.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bot_resources (
+                    resource_key TEXT PRIMARY KEY,
+                    discord_channel_id INTEGER NOT NULL
+                )
+                """
+            )
             await self._add_missing_columns(database)
             await database.commit()
 
@@ -72,6 +84,10 @@ class SubmissionStore:
             ("approved_by_name", "TEXT"),
             ("approved_at", "TEXT"),
             ("approved_document_id", "TEXT"),
+            ("closed_by_user_id", "INTEGER"),
+            ("closed_by_name", "TEXT"),
+            ("closed_at", "TEXT"),
+            ("closed_note", "TEXT"),
         ):
             if name not in existing:
                 await database.execute(f"ALTER TABLE submissions ADD COLUMN {name} {definition}")
@@ -118,6 +134,10 @@ class SubmissionStore:
                 approved_by_name=None,
                 approved_at=None,
                 approved_document_id=None,
+                closed_by_user_id=None,
+                closed_by_name=None,
+                closed_at=None,
+                closed_note=None,
             )
 
     async def record_baseline(
@@ -233,6 +253,49 @@ class SubmissionStore:
             await database.commit()
         return cursor.rowcount == 1
 
+    async def get_resource_channel_id(self, resource_key: str) -> int | None:
+        """Return a durable Discord resource created lazily by the bot."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute(
+                "SELECT discord_channel_id FROM bot_resources WHERE resource_key = ?", (resource_key,)
+            )
+            row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def set_resource_channel_id(self, resource_key: str, channel_id: int) -> None:
+        async with aiosqlite.connect(self.path) as database:
+            await database.execute(
+                """
+                INSERT INTO bot_resources (resource_key, discord_channel_id) VALUES (?, ?)
+                ON CONFLICT(resource_key) DO UPDATE SET discord_channel_id = excluded.discord_channel_id
+                """,
+                (resource_key, channel_id),
+            )
+            await database.commit()
+
+    async def mark_closed(
+        self,
+        *,
+        submission_id: int,
+        closer_user_id: int,
+        closer_name: str,
+        closed_at: str,
+        closed_note: str | None,
+    ) -> bool:
+        """Record a terminal closure and reject a duplicate close action."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute(
+                """
+                UPDATE submissions
+                SET status = 'closed', closed_by_user_id = ?, closed_by_name = ?,
+                    closed_at = ?, closed_note = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status != 'closed'
+                """,
+                (closer_user_id, closer_name, closed_at, closed_note, submission_id),
+            )
+            await database.commit()
+        return cursor.rowcount == 1
+
     @staticmethod
     def _submission_from_row(row: aiosqlite.Row) -> Submission:
         return Submission(
@@ -251,4 +314,8 @@ class SubmissionStore:
             approved_by_name=row["approved_by_name"],
             approved_at=row["approved_at"],
             approved_document_id=row["approved_document_id"],
+            closed_by_user_id=row["closed_by_user_id"],
+            closed_by_name=row["closed_by_name"],
+            closed_at=row["closed_at"],
+            closed_note=row["closed_note"],
         )

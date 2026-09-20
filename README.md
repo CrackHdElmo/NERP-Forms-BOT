@@ -48,6 +48,13 @@ to view, message, and attach files there; the bot posts an in-ticket audit messa
 The same command is designed for future private Attorney Request and Corporate Office ticket
 workflows. Discord Forum posts, including Dockets and Business Licensing, inherit their parent
 Forum permissions and cannot grant access to one individual post.
+
+`/close-ticket` can be used by the verified requester, configured judicial roles, the configured
+Attorney General role, or a server/bot administrator. On its first use, the bot creates a
+read-only `#doj-case-records` channel beneath Court Administration with access limited to the
+configured DOJ and PD staff roles. Each closure posts a staff synopsis there, locks a private
+ticket for participants, or archives and locks a tracked Forum post. The original ticket/post
+remains available to staff as the detailed source record.
 The bot also checks the linked response Sheet automatically every 60 seconds by default;
 `/court-order-sync` remains available to administrators as an immediate reconciliation and
 retry command. Set `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` to a larger value (for example,
