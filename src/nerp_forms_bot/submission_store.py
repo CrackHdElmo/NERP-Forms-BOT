@@ -95,6 +95,22 @@ class SubmissionStore:
                 tracker_row=None,
             )
 
+    async def record_baseline(
+        self, *, source_key: str, workflow: str, requester_username: str, payload: dict[str, str]
+    ) -> bool:
+        """Mark a pre-existing source row as seen without creating a Discord ticket."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute(
+                """
+                INSERT OR IGNORE INTO submissions
+                (source_key, workflow, requester_username, payload_json, status)
+                VALUES (?, ?, ?, ?, 'baseline')
+                """,
+                (source_key, workflow, requester_username, json.dumps(payload, sort_keys=True)),
+            )
+            await database.commit()
+            return cursor.rowcount == 1
+
     async def mark_ticket_created(
         self,
         submission_id: int,

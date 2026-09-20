@@ -154,6 +154,33 @@ class NerpFormsBot(discord.Client):
                 )
 
         @self.tree.command(
+            name="court-order-baseline",
+            description="Mark current Court Order Form responses as historical without creating tickets.",
+            guild=guild,
+        )
+        async def court_order_baseline(interaction: discord.Interaction) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only a configured bot administrator can run this command.", ephemeral=True
+                )
+                return
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                marked = await self._baseline_court_order_responses()
+            except Exception:
+                LOGGER.exception("Court Order Form baseline failed")
+                await interaction.followup.send(
+                    "The Court Order Form baseline failed. Check the Wispbyte console for details.",
+                    ephemeral=True,
+                )
+                return
+            await interaction.followup.send(
+                f"Marked {marked} existing Court Order response(s) as historical. "
+                "Future submissions can now be imported safely.",
+                ephemeral=True,
+            )
+
+        @self.tree.command(
             name="claim-court-order",
             description="Claim your latest Court Order request using your Discord username.",
             guild=guild,
@@ -215,15 +242,7 @@ class NerpFormsBot(discord.Client):
         intake = self.environment.court_order_intake
         if not intake or not self.settings.google_service_account_file:
             raise RuntimeError("Court Order Form intake is not configured on this host.")
-        workspace = GoogleWorkspaceService(
-            self.settings.google_service_account_file,
-            self.environment.google_workspace.test_drive_folder_id or "",
-        )
-        rows = await asyncio.to_thread(
-            workspace.get_form_response_rows,
-            intake.response_spreadsheet_id,
-            intake.response_sheet_name,
-        )
+        workspace, rows = await self._get_court_order_rows()
         created = 0
         for row in rows:
             source_key = f"{intake.response_spreadsheet_id}:{row['_source_row']}"
@@ -259,6 +278,42 @@ class NerpFormsBot(discord.Client):
                 await self.store.mark_failed(submission.id)
                 raise
         return created
+
+    async def _baseline_court_order_responses(self) -> int:
+        """Suppress historical rows before enabling active intake for a copied Form."""
+        intake = self.environment.court_order_intake
+        if not intake:
+            raise RuntimeError("Court Order Form intake is not configured on this host.")
+        _, rows = await self._get_court_order_rows()
+        marked = 0
+        for row in rows:
+            source_key = f"{intake.response_spreadsheet_id}:{row['_source_row']}"
+            username = self._normalize_username(
+                self._answer(row, "Discord Username", "Your Discord Name")
+            )
+            if await self.store.record_baseline(
+                source_key=source_key,
+                workflow="court_order",
+                requester_username=username or "unmatched",
+                payload=row,
+            ):
+                marked += 1
+        return marked
+
+    async def _get_court_order_rows(self) -> tuple[GoogleWorkspaceService, list[dict[str, str]]]:
+        intake = self.environment.court_order_intake
+        if not intake or not self.settings.google_service_account_file:
+            raise RuntimeError("Court Order Form intake is not configured on this host.")
+        workspace = GoogleWorkspaceService(
+            self.settings.google_service_account_file,
+            self.environment.google_workspace.test_drive_folder_id or "",
+        )
+        rows = await asyncio.to_thread(
+            workspace.get_form_response_rows,
+            intake.response_spreadsheet_id,
+            intake.response_sheet_name,
+        )
+        return workspace, rows
 
     async def _create_court_order_ticket(self, submission: Submission) -> discord.TextChannel:
         guild = self.get_guild(self.environment.guild.id)
