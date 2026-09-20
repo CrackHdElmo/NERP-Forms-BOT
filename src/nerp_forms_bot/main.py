@@ -997,6 +997,9 @@ class NerpFormsBot(discord.Client):
         charges = self._answers_for_prefix(
             submission.payload, "Initial Charges To Be Filed Against Subject:"
         )
+        probable_causes = self._answers_for_prefix(
+            submission.payload, "Probable Cause For Arrest:"
+        )
         evidence_links = self._answers_for_prefix(submission.payload, "Please include any evidence")
         subject_lines = [
             f"{number}. {self._value_at(subjects, number - 1)} "
@@ -1060,6 +1063,24 @@ class NerpFormsBot(discord.Client):
             )
         embed.set_footer(text=f"Closed at {closed_at}")
         records = [embed]
+        for number, probable_cause in enumerate(probable_causes, start=1):
+            if probable_cause.strip().upper() in {"", "N/A", "NA", "NONE"}:
+                continue
+            subject_name = self._value_at(subjects, number - 1)
+            for part, chunk in enumerate(self._discord_embed_chunks(probable_cause), start=1):
+                continuation = f" (continued {part})" if part > 1 else ""
+                probable_cause_embed = discord.Embed(
+                    title=f"Submitted probable cause — {submission.request_id}",
+                    color=discord.Color.dark_grey(),
+                    timestamp=datetime.fromisoformat(closed_at),
+                )
+                probable_cause_embed.add_field(
+                    name=f"Subject {number}: {subject_name}{continuation}",
+                    value=chunk,
+                    inline=False,
+                )
+                probable_cause_embed.set_footer(text=f"Staff record for {submission.request_id}")
+                records.append(probable_cause_embed)
         for number, evidence in enumerate(evidence_links, start=1):
             if evidence.strip().upper() in {"", "N/A", "NA", "NONE"}:
                 continue
