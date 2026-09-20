@@ -37,6 +37,13 @@ Each docket is a post in the configured `docket` Forum Channel.
 
 The initial slash-command surface is deliberately small: `/bot-status` verifies the
 selected environment and confirms that the bot is connected to the expected guild.
+`/setup-workflow` is an administrator-only, private guided setup wizard. It uses a dropdown,
+optional name-customization form, preview, and explicit confirmation before it creates anything.
+Its initial presets create or safely register the Court Administration resources (Service Desk,
+Docket Forum, and staff-only case records), the Off-Docket Court Orders category, the Attorney
+Requests category, or the Corporate Office/Business Licensing Forum. Existing matching bot
+resources are reused rather than duplicated, and their IDs are stored in the bot database so
+runtime workflows can use resources created through Discord without editing GitHub files.
 `/google-workspace-status` is restricted to configured bot administrators; it verifies
 the protected Google credential and creates (or finds) the test request tracker in the
 shared Drive folder. `/court-order-sync` imports new Court Order Form response rows into

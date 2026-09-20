@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
 
@@ -32,6 +33,141 @@ class Settings(BaseSettings):
     google_forms_poll_interval_seconds: int = 60
     fivemanage_api_token: str | None = None
     fivemanage_storage_path: str = "nerp-doj/court-orders"
+
+
+@dataclass(frozen=True)
+class SetupPlan:
+    """One administrator-reviewed Discord resource setup plan."""
+
+    preset: str
+    names: dict[str, str]
+
+
+class SetupPresetView(discord.ui.View):
+    """First, private setup-wizard step: choose the resource preset."""
+
+    def __init__(self, bot: NerpFormsBot) -> None:
+        super().__init__(timeout=900)
+        self.bot = bot
+        selector = discord.ui.Select(
+            placeholder="Choose a workflow to set up…",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(
+                    label="Court Administration",
+                    value="court_administration",
+                    description="Service desk, Docket Forum, and staff case records.",
+                ),
+                discord.SelectOption(
+                    label="Off-Docket Court Orders",
+                    value="off_docket_court_orders",
+                    description="Private category for bot-created Court Order tickets.",
+                ),
+                discord.SelectOption(
+                    label="Attorney Requests",
+                    value="attorney_requests",
+                    description="Private category prepared for Attorney Request tickets.",
+                ),
+                discord.SelectOption(
+                    label="Business Licensing",
+                    value="business_licensing",
+                    description="Corporate Office category and Business Licensing Forum.",
+                ),
+            ],
+        )
+        selector.callback = self._choose_preset
+        self.add_item(selector)
+
+    async def _choose_preset(self, interaction: discord.Interaction) -> None:
+        if not self.bot._is_administrator(interaction):
+            await interaction.response.send_message(
+                "Only a configured bot administrator can run setup.", ephemeral=True
+            )
+            return
+        selector = self.children[0]
+        assert isinstance(selector, discord.ui.Select)
+        plan = self.bot._default_setup_plan(selector.values[0])
+        await interaction.response.edit_message(
+            embed=self.bot._setup_preview_embed(plan),
+            view=SetupPlanView(self.bot, plan),
+        )
+
+
+class SetupPlanView(discord.ui.View):
+    """Second wizard step: customize or confirm an explicit setup preview."""
+
+    def __init__(self, bot: NerpFormsBot, plan: SetupPlan) -> None:
+        super().__init__(timeout=900)
+        self.bot = bot
+        self.plan = plan
+
+    @discord.ui.button(label="Customize names", style=discord.ButtonStyle.secondary)
+    async def customize(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        if not self.bot._is_administrator(interaction):
+            await interaction.response.send_message(
+                "Only a configured bot administrator can run setup.", ephemeral=True
+            )
+            return
+        await interaction.response.send_modal(SetupNamesModal(self.bot, self.plan))
+
+    @discord.ui.button(label="Confirm setup", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        if not self.bot._is_administrator(interaction):
+            await interaction.response.send_message(
+                "Only a configured bot administrator can run setup.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            result = await self.bot._apply_setup_plan(self.plan)
+        except (discord.Forbidden, PermissionError):
+            await interaction.followup.send(
+                "The bot lacks a required Discord permission. Grant its role **Manage Channels**, "
+                "**Manage Roles**, and **Manage Threads**, then run `/setup-workflow` again.",
+                ephemeral=True,
+            )
+            return
+        except Exception:
+            LOGGER.exception("Guided setup failed for preset %s", self.plan.preset)
+            await interaction.followup.send(
+                "Setup could not be completed. Check the Wispbyte console for the safe diagnostic message.",
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(result, ephemeral=True)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await interaction.response.edit_message(content="Setup cancelled. No resources were created.", embed=None, view=None)
+
+
+class SetupNamesModal(discord.ui.Modal):
+    """Optional names step for a guided setup plan."""
+
+    def __init__(self, bot: NerpFormsBot, plan: SetupPlan) -> None:
+        super().__init__(title="Customize setup names")
+        self.bot = bot
+        self.plan = plan
+        self.inputs: dict[str, discord.ui.TextInput] = {}
+        for resource_key, label in bot._setup_name_fields(plan.preset):
+            text_input = discord.ui.TextInput(
+                label=label,
+                default=plan.names[resource_key],
+                required=True,
+                max_length=100,
+            )
+            self.inputs[resource_key] = text_input
+            self.add_item(text_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        names = {resource_key: text_input.value for resource_key, text_input in self.inputs.items()}
+        plan = self.bot._default_setup_plan(self.plan.preset, names)
+        await interaction.response.send_message(
+            embed=self.bot._setup_preview_embed(plan),
+            view=SetupPlanView(self.bot, plan),
+            ephemeral=True,
+        )
 
 
 class NerpFormsBot(discord.Client):
@@ -123,6 +259,347 @@ class NerpFormsBot(discord.Client):
             "Please indicate the Docket Name/ID.",
         )
 
+    @staticmethod
+    def _setup_name_fields(preset: str) -> list[tuple[str, str]]:
+        fields = {
+            "court_administration": [
+                ("court_administration_category", "Category name"),
+                ("service_desk_channel", "Service Desk channel name"),
+                ("docket_forum_channel", "Docket Forum name"),
+                ("doj_case_records", "DOJ Case Records channel name"),
+            ],
+            "off_docket_court_orders": [
+                ("off_docket_tickets_category", "Category name"),
+            ],
+            "attorney_requests": [
+                ("attorney_request_tickets_category", "Category name"),
+            ],
+            "business_licensing": [
+                ("corporate_office_category", "Category name"),
+                ("business_licensing_forum_channel", "Business Licensing Forum name"),
+            ],
+        }
+        return fields[preset]
+
+    def _default_setup_plan(
+        self, preset: str, custom_names: dict[str, str] | None = None
+    ) -> SetupPlan:
+        defaults = {
+            "court_administration": {
+                "court_administration_category": "Court Administration",
+                "service_desk_channel": "service-desk",
+                "docket_forum_channel": "docket",
+                "doj_case_records": "doj-case-records",
+            },
+            "off_docket_court_orders": {
+                "off_docket_tickets_category": "Off-Docket Requests",
+            },
+            "attorney_requests": {
+                "attorney_request_tickets_category": "Attorney Requests",
+            },
+            "business_licensing": {
+                "corporate_office_category": "Corporate Office",
+                "business_licensing_forum_channel": "business-licensing",
+            },
+        }
+        if preset not in defaults:
+            raise ValueError("Unknown guided setup preset.")
+        names = defaults[preset] | (custom_names or {})
+        for resource_key, label in self._setup_name_fields(preset):
+            value = names.get(resource_key, "").strip()
+            if not value:
+                raise ValueError(f"{label} cannot be blank.")
+            names[resource_key] = (
+                self._normalize_discord_name(value) if "channel" in resource_key or resource_key == "doj_case_records" else value[:100]
+            )
+        return SetupPlan(preset=preset, names=names)
+
+    @staticmethod
+    def _normalize_discord_name(value: str) -> str:
+        """Turn an administrator-entered channel name into a valid readable Discord name."""
+        normalized = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+        return normalized[:100] or "nerp-resource"
+
+    def _setup_preview_embed(self, plan: SetupPlan) -> discord.Embed:
+        labels = {
+            "court_administration": "Court Administration",
+            "off_docket_court_orders": "Off-Docket Court Orders",
+            "attorney_requests": "Attorney Requests",
+            "business_licensing": "Business Licensing",
+        }
+        details = {
+            "court_administration": "Creates a service directory, Docket Forum, and DOJ/PD-only case-records channel.",
+            "off_docket_court_orders": "Creates the private category used for bot-created Court Order tickets.",
+            "attorney_requests": "Creates the private category reserved for future Attorney Request tickets.",
+            "business_licensing": "Creates the Corporate Office category and its staff-operated licensing Forum.",
+        }
+        lines = []
+        for resource_key, label in self._setup_name_fields(plan.preset):
+            resource_type = "category" if resource_key.endswith("category") else "channel / Forum"
+            lines.append(f"**{label}** ({resource_type}): `{plan.names[resource_key]}`")
+        embed = discord.Embed(
+            title=f"Setup preview — {labels[plan.preset]}",
+            description=(
+                f"{details[plan.preset]}\n\nNo resource will be created until you select **Confirm setup**. "
+                "Existing matching bot resources will be reused rather than duplicated."
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name="Resources", value="\n".join(lines), inline=False)
+        embed.add_field(
+            name="Permissions applied to new resources",
+            value=(
+                "Public directory only: read-only. Staff resources: DOJ/PD staff roles only. "
+                "Private ticket categories: hidden from the public."
+            ),
+            inline=False,
+        )
+        return embed
+
+    async def _registered_or_configured_channel(
+        self, guild: discord.Guild, resource_key: str, configured_id: int | None
+    ) -> discord.abc.GuildChannel | None:
+        stored_id = await self.store.get_resource_channel_id(resource_key)
+        for channel_id in (stored_id, configured_id):
+            if channel_id:
+                channel = guild.get_channel(channel_id)
+                if channel:
+                    return channel
+        return None
+
+    async def _resolve_category(self, resource_key: str, configured_key: str) -> discord.CategoryChannel:
+        guild = self.get_guild(self.environment.guild.id)
+        configured_id = self.environment.categories.get(configured_key)
+        category = (
+            await self._registered_or_configured_channel(guild, resource_key, configured_id)
+            if guild
+            else None
+        )
+        if not isinstance(category, discord.CategoryChannel):
+            raise TypeError(f"The required category '{configured_key}' is not configured.")
+        return category
+
+    def _staff_overwrites(
+        self, guild: discord.Guild, *, allow_messages: bool
+    ) -> dict[discord.abc.Snowflake, discord.PermissionOverwrite]:
+        """Use the same DOJ/PD staff visibility model for newly-created staff resources."""
+        me = guild.me
+        if not me:
+            raise RuntimeError("The bot member was not available in the configured guild.")
+        overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            me: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                attach_files=True,
+                manage_channels=True,
+                manage_messages=True,
+                manage_threads=True,
+            ),
+        }
+        for role_id in self._case_record_viewer_role_ids():
+            role = guild.get_role(role_id)
+            if role:
+                overwrites[role] = discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=allow_messages,
+                    read_message_history=True,
+                    attach_files=allow_messages,
+                    embed_links=allow_messages,
+                    create_public_threads=allow_messages,
+                    send_messages_in_threads=allow_messages,
+                )
+        return overwrites
+
+    async def _ensure_category(
+        self,
+        guild: discord.Guild,
+        *,
+        resource_key: str,
+        configured_key: str,
+        name: str,
+        overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite],
+    ) -> tuple[discord.CategoryChannel, bool]:
+        category = await self._registered_or_configured_channel(
+            guild, resource_key, self.environment.categories.get(configured_key)
+        )
+        if not isinstance(category, discord.CategoryChannel):
+            category = discord.utils.get(guild.categories, name=name)
+        created = False
+        if not isinstance(category, discord.CategoryChannel):
+            category = await guild.create_category(
+                name=name,
+                overwrites=overwrites,
+                reason="NERP Forms BOT guided setup",
+            )
+            created = True
+        await self.store.set_resource_channel_id(resource_key, category.id)
+        return category, created
+
+    async def _ensure_text_channel(
+        self,
+        guild: discord.Guild,
+        *,
+        resource_key: str,
+        configured_key: str | None,
+        category: discord.CategoryChannel,
+        name: str,
+        topic: str,
+        overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite],
+    ) -> tuple[discord.TextChannel, bool]:
+        configured_id = self.environment.channels.get(configured_key) if configured_key else None
+        channel = await self._registered_or_configured_channel(guild, resource_key, configured_id)
+        if not isinstance(channel, discord.TextChannel):
+            channel = discord.utils.get(category.text_channels, name=name)
+        created = False
+        if not isinstance(channel, discord.TextChannel):
+            channel = await guild.create_text_channel(
+                name=name,
+                category=category,
+                topic=topic,
+                overwrites=overwrites,
+                reason="NERP Forms BOT guided setup",
+            )
+            created = True
+        await self.store.set_resource_channel_id(resource_key, channel.id)
+        return channel, created
+
+    async def _ensure_forum_channel(
+        self,
+        guild: discord.Guild,
+        *,
+        resource_key: str,
+        configured_key: str | None,
+        category: discord.CategoryChannel,
+        name: str,
+        topic: str,
+        overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite],
+    ) -> tuple[discord.ForumChannel, bool]:
+        configured_id = self.environment.channels.get(configured_key) if configured_key else None
+        channel = await self._registered_or_configured_channel(guild, resource_key, configured_id)
+        if not isinstance(channel, discord.ForumChannel):
+            channel = discord.utils.get(category.forums, name=name)
+        created = False
+        if not isinstance(channel, discord.ForumChannel):
+            channel = await guild.create_forum(
+                name=name,
+                category=category,
+                topic=topic,
+                overwrites=overwrites,
+                reason="NERP Forms BOT guided setup",
+            )
+            created = True
+        await self.store.set_resource_channel_id(resource_key, channel.id)
+        return channel, created
+
+    async def _apply_setup_plan(self, plan: SetupPlan) -> str:
+        """Create or safely register all resources in one confirmed administrator plan."""
+        guild = self.get_guild(self.environment.guild.id)
+        if not guild or not guild.me:
+            raise RuntimeError("The configured Discord server or bot member was not available.")
+        required_permissions = guild.me.guild_permissions
+        if not (
+            required_permissions.manage_channels
+            and required_permissions.manage_roles
+            and required_permissions.manage_threads
+        ):
+            raise PermissionError("Missing Manage Channels, Manage Roles, or Manage Threads.")
+
+        results: list[tuple[str, discord.abc.GuildChannel, bool]] = []
+        if plan.preset == "court_administration":
+            category, created = await self._ensure_category(
+                guild,
+                resource_key="court_administration_category",
+                configured_key="court_administration",
+                name=plan.names["court_administration_category"],
+                overwrites=self._staff_overwrites(guild, allow_messages=True),
+            )
+            results.append(("Category", category, created))
+            service_desk_overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
+                guild.default_role: discord.PermissionOverwrite(
+                    view_channel=True, send_messages=False, read_message_history=True
+                ),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True, send_messages=True, read_message_history=True, manage_messages=True
+                ),
+            }
+            service_desk, created = await self._ensure_text_channel(
+                guild,
+                resource_key="service_desk_channel",
+                configured_key="service_desk",
+                category=category,
+                name=plan.names["service_desk_channel"],
+                topic="NERP Forms BOT request directory and workflow information.",
+                overwrites=service_desk_overwrites,
+            )
+            results.append(("Read-only directory", service_desk, created))
+            docket, created = await self._ensure_forum_channel(
+                guild,
+                resource_key="docket_forum_channel",
+                configured_key="docket_forum",
+                category=category,
+                name=plan.names["docket_forum_channel"],
+                topic="Active criminal and civil Docket records.",
+                overwrites=self._staff_overwrites(guild, allow_messages=True),
+            )
+            results.append(("Docket Forum", docket, created))
+            records, created = await self._ensure_text_channel(
+                guild,
+                resource_key="doj_case_records",
+                configured_key=None,
+                category=category,
+                name=plan.names["doj_case_records"],
+                topic="NERP Forms BOT permanent DOJ/PD case and request closure records.",
+                overwrites=self._staff_overwrites(guild, allow_messages=False),
+            )
+            results.append(("Staff records", records, created))
+        elif plan.preset == "off_docket_court_orders":
+            category, created = await self._ensure_category(
+                guild,
+                resource_key="off_docket_tickets_category",
+                configured_key="off_docket_tickets",
+                name=plan.names["off_docket_tickets_category"],
+                overwrites=self._staff_overwrites(guild, allow_messages=True),
+            )
+            results.append(("Private ticket category", category, created))
+        elif plan.preset == "attorney_requests":
+            category, created = await self._ensure_category(
+                guild,
+                resource_key="attorney_request_tickets_category",
+                configured_key="attorney_request_tickets",
+                name=plan.names["attorney_request_tickets_category"],
+                overwrites=self._staff_overwrites(guild, allow_messages=True),
+            )
+            results.append(("Private ticket category", category, created))
+        elif plan.preset == "business_licensing":
+            category, created = await self._ensure_category(
+                guild,
+                resource_key="corporate_office_category",
+                configured_key="corporate_office",
+                name=plan.names["corporate_office_category"],
+                overwrites=self._staff_overwrites(guild, allow_messages=True),
+            )
+            results.append(("Category", category, created))
+            forum, created = await self._ensure_forum_channel(
+                guild,
+                resource_key="business_licensing_forum_channel",
+                configured_key="business_licensing_forum",
+                category=category,
+                name=plan.names["business_licensing_forum_channel"],
+                topic="Business Licensing and Corporate Office workflow records.",
+                overwrites=self._staff_overwrites(guild, allow_messages=True),
+            )
+            results.append(("Business Licensing Forum", forum, created))
+        else:
+            raise ValueError("Unknown guided setup preset.")
+
+        summary = "\n".join(
+            f"• {'Created' if created else 'Reused'} {label}: {resource.mention}"
+            for label, resource, created in results
+        )
+        return f"**Setup complete — {plan.preset.replace('_', ' ').title()}**\n{summary}"
+
     async def setup_hook(self) -> None:
         await self.store.initialize()
         guild = discord.Object(id=self.environment.guild.id)
@@ -147,6 +624,24 @@ class NerpFormsBot(discord.Client):
             await interaction.response.send_message(
                 f"NERP Forms BOT is connected to **{self.environment.guild.name}** "
                 f"using the **{self.environment.environment}** configuration profile.",
+                ephemeral=True,
+            )
+
+        @self.tree.command(
+            name="setup-workflow",
+            description="Guided administrator setup for NERP categories, channels, and Forums.",
+            guild=guild,
+        )
+        async def setup_workflow(interaction: discord.Interaction) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only a configured bot administrator can run setup.", ephemeral=True
+                )
+                return
+            await interaction.response.send_message(
+                "Choose the workflow resources you want the bot to set up. This preview is private; "
+                "nothing will be created until you confirm the plan.",
+                view=SetupPresetView(self),
                 ephemeral=True,
             )
 
@@ -929,10 +1424,11 @@ class NerpFormsBot(discord.Client):
     async def _get_or_create_case_records_channel(self) -> discord.TextChannel:
         """Lazily create the permanent DOJ/PD-only records channel on first closure."""
         guild = self.get_guild(self.environment.guild.id)
-        category_id = self.environment.categories.get("court_administration")
-        category = guild.get_channel(category_id) if guild and category_id else None
-        if not guild or not isinstance(category, discord.CategoryChannel):
-            raise RuntimeError("The Court Administration category is not configured correctly.")
+        if not guild:
+            raise RuntimeError("The configured Discord server was not available.")
+        category = await self._resolve_category(
+            "court_administration_category", "court_administration"
+        )
 
         stored_channel_id = await self.store.get_resource_channel_id("doj_case_records")
         stored_channel = guild.get_channel(stored_channel_id) if stored_channel_id else None
@@ -1119,10 +1615,11 @@ class NerpFormsBot(discord.Client):
 
     async def _create_court_order_ticket(self, submission: Submission) -> discord.TextChannel:
         guild = self.get_guild(self.environment.guild.id)
-        category_id = self.environment.categories.get("off_docket_tickets")
-        category = guild.get_channel(category_id) if guild and category_id else None
-        if not guild or not isinstance(category, discord.CategoryChannel):
-            raise RuntimeError("The Off-Docket Requests category is not configured correctly.")
+        if not guild:
+            raise RuntimeError("The configured Discord server was not available.")
+        category = await self._resolve_category(
+            "off_docket_tickets_category", "off_docket_tickets"
+        )
         me = guild.me
         if not me:
             raise RuntimeError("The bot member was not available in the configured guild.")

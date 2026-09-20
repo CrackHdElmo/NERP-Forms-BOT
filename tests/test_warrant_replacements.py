@@ -112,3 +112,20 @@ def test_docket_or_off_docket_reference_accepts_the_updated_form_question() -> N
     }
 
     assert _bot()._existing_docket_reference(payload) == "COR-000006"
+
+
+def test_setup_plan_uses_safe_resource_names_without_changing_category_case() -> None:
+    plan = _bot()._default_setup_plan(
+        "court_administration",
+        {
+            "court_administration_category": "Court Operations",
+            "service_desk_channel": "Service Desk!",
+            "docket_forum_channel": "Active Dockets",
+            "doj_case_records": "DOJ Case Records",
+        },
+    )
+
+    assert plan.names["court_administration_category"] == "Court Operations"
+    assert plan.names["service_desk_channel"] == "service-desk"
+    assert plan.names["docket_forum_channel"] == "active-dockets"
+    assert plan.names["doj_case_records"] == "doj-case-records"
