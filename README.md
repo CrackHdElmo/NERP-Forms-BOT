@@ -37,8 +37,10 @@ Each docket is a post in the configured `docket` Forum Channel.
 
 The initial slash-command surface is deliberately small: `/bot-status` verifies the
 selected environment and confirms that the bot is connected to the expected guild.
-Google intake, document generation, and ticket/docket creation will be added only after
-the Google integration and template decisions are configured.
+`/google-workspace-status` is restricted to configured bot administrators; it verifies
+the protected Google credential and creates (or finds) the test request tracker in the
+shared Drive folder. Google Form intake, document generation, and ticket/docket creation
+will be added in subsequent milestones.
 
 ## Deployment
 

@@ -24,6 +24,14 @@ class WorkflowConfig(BaseModel):
     initial_status: str
 
 
+class GoogleWorkspaceConfig(BaseModel):
+    """Non-secret Google resource identifiers for one environment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    test_drive_folder_id: str | None = None
+
+
 class EnvironmentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -33,6 +41,7 @@ class EnvironmentConfig(BaseModel):
     categories: dict[str, int | None] = Field(default_factory=dict)
     roles: dict[str, list[int]] = Field(default_factory=dict)
     workflows: dict[str, WorkflowConfig] = Field(default_factory=dict)
+    google_workspace: GoogleWorkspaceConfig = Field(default_factory=GoogleWorkspaceConfig)
     test_requester_user_id: int | None = None
 
 

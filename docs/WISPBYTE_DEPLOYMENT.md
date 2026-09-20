@@ -46,9 +46,12 @@ Create these in Wispbyte's Startup / Environment Variables settings:
 | `NERP_ENVIRONMENT` | `test` |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./data/nerp_forms_bot.db` |
 | `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` | `60` |
+| `GOOGLE_SERVICE_ACCOUNT_FILE` | `/home/container/secrets/google-service-account.json` |
 
-Do **not** create `GOOGLE_SERVICE_ACCOUNT_FILE` yet. It will be added after the Google
-Cloud service account and its Drive/Sheets/Docs access are configured.
+Upload the service-account JSON file directly to Wispbyte's ignored `secrets/` folder.
+Do not commit it to GitHub, upload it through source control, or paste its contents into
+chat. The test Drive folder ID belongs in `config/environments/test.yaml`; it is an
+identifier, not a credential.
 
 ## 4. First startup check
 
@@ -61,6 +64,10 @@ the bot connected, with its Discord account name and ID. In Altitude Government,
 
 The bot must reply privately that it is connected to **Altitude Government** using the
 **test** configuration profile.
+
+After the Google credential file and test Drive folder are configured, a test-role
+administrator can run `/google-workspace-status`. The command creates or finds the
+single `NERP Forms BOT - Test Requests` tracker and returns its Google Sheets link.
 
 ## Troubleshooting
 

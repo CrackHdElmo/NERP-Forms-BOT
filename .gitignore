@@ -17,6 +17,9 @@ venv/
 data/
 logs/
 
+# Locally generated build artifacts
+outputs/
+
 # Editors and operating systems
 .vscode/
 .idea/

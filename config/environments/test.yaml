@@ -15,6 +15,10 @@ categories:
   attorney_request_tickets: 1547691504112373800
   corporate_office: 1547668149024063528
 
+google_workspace:
+  # This folder was shared directly with the test service account. It is not a secret.
+  test_drive_folder_id: 1gctW_g43-zsMpdvVehlI146M27-YPjmi
+
 roles:
   administrators:
     - 1414109505805094938 # Mod (test server)
