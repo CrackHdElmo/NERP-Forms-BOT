@@ -646,14 +646,6 @@ class NerpFormsBot(discord.Client):
                     ephemeral=True,
                 )
                 return
-            if submission.status == "denied":
-                await interaction.response.send_message(
-                    "This Arrest Warrant was denied. Submit a corrected Court Order Form that references "
-                    f"**{submission.request_id}** to continue in this request ticket.",
-                    ephemeral=True,
-                )
-                return
-
             await interaction.response.defer(ephemeral=True, thinking=True)
             replacements, validation_error = self._arrest_warrant_replacements(submission=submission)
             if validation_error:
@@ -1036,17 +1028,22 @@ class NerpFormsBot(discord.Client):
             name="Status at closure", value=submission.status.replace("_", " ").title(), inline=True
         )
         embed.add_field(name="Closed by", value=closed_by.mention, inline=True)
-        if submission.approved_by_name:
-            embed.add_field(
-                name="Judicial decision",
-                value=f"Approved by <@{submission.approved_by_user_id}> on {submission.approved_at}",
-                inline=False,
-            )
-        elif submission.denied_by_name:
+        judicial_history: list[str] = []
+        if submission.denied_by_name:
             decision = f"Denied by <@{submission.denied_by_user_id}> on {submission.denied_at}"
             if submission.denial_note:
                 decision += f"\n**Denial notes:** {submission.denial_note}"
-            embed.add_field(name="Judicial decision", value=decision[:1024], inline=False)
+            judicial_history.append(decision)
+        if submission.approved_by_name:
+            judicial_history.append(
+                f"Approved by <@{submission.approved_by_user_id}> on {submission.approved_at}"
+            )
+        if judicial_history:
+            embed.add_field(
+                name="Judicial history",
+                value="\n\n".join(judicial_history)[:1024],
+                inline=False,
+            )
         if subject_lines:
             embed.add_field(name="Subjects", value="\n".join(subject_lines)[:1024], inline=False)
         if closure_note:

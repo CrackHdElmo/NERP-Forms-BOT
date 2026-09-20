@@ -62,7 +62,9 @@ Within a Court Order ticket, a configured Judge or bot administrator can use
 are retained. The ticket deliberately stays open so the requester can submit a corrected Form;
 entering the existing `COR-######` request ID (or the existing bot-managed ticket name) in the
 Form's **Docket / Off-Docket Name/ID** answer attaches the new submission to that existing
-ticket rather than creating another private channel.
+ticket rather than creating another private channel. A later authorized Judge or administrator
+may still approve the same denied request; the permanent closure record retains both the earlier
+denial and the later approval.
 The bot also checks the linked response Sheet automatically every 60 seconds by default;
 `/court-order-sync` remains available to administrators as an immediate reconciliation and
 retry command. Set `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` to a larger value (for example,

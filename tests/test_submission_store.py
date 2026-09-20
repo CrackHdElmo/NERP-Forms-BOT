@@ -120,6 +120,43 @@ def test_denial_is_recorded_once_and_keeps_the_request_available(tmp_path) -> No
     assert saved.denial_note == "Add the missing probable cause details."
 
 
+def test_later_approval_preserves_the_earlier_denial_audit(tmp_path) -> None:
+    async def exercise() -> tuple[bool, object]:
+        store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
+        await store.initialize()
+        submission = await store.begin_submission(
+            source_key="sheet:approval-after-denial",
+            workflow="court_order",
+            requester_username="requester",
+            payload={"Request Type": "Arrest Warrant"},
+        )
+        assert submission is not None
+        denied = await store.mark_warrant_denied(
+            submission_id=submission.id,
+            denier_user_id=42,
+            denier_name="Judge One",
+            denied_at="2026-09-20T15:00:00+00:00",
+            denial_note="Initial review denied.",
+        )
+        approved = await store.mark_warrant_approved(
+            submission_id=submission.id,
+            approver_user_id=43,
+            approver_name="Judge Two",
+            approved_at="2026-09-20T15:10:00+00:00",
+            approved_document_id="approved-document-id",
+        )
+        return denied and approved, await store.get_by_request_id(submission.request_id)
+
+    recorded, saved = asyncio.run(exercise())
+
+    assert recorded is True
+    assert saved is not None
+    assert saved.status == "approved"
+    assert saved.denied_by_name == "Judge One"
+    assert saved.denial_note == "Initial review denied."
+    assert saved.approved_by_name == "Judge Two"
+
+
 def test_open_submission_lookup_excludes_closed_requests(tmp_path) -> None:
     async def exercise() -> list[str]:
         store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
