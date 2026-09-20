@@ -47,6 +47,12 @@ class TrackingSheet:
     created: bool
 
 
+@dataclass(frozen=True)
+class TrackingRow:
+    spreadsheet_id: str
+    row_number: int
+
+
 class GoogleWorkspaceService:
     """Create or locate the one test tracking Sheet in the shared Drive folder."""
 
@@ -127,3 +133,100 @@ class GoogleWorkspaceService:
             url=created.get("webViewLink", f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"),
             created=True,
         )
+
+    def get_form_response_rows(self, spreadsheet_id: str, sheet_name: str) -> list[dict[str, str]]:
+        """Return nonblank response rows as header-keyed dictionaries."""
+        sheets = self._sheets_service()
+        response = sheets.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_name}'!A:BB",
+        ).execute()
+        values = response.get("values", [])
+        if not values:
+            return []
+        headers = [value.strip() for value in values[0]]
+        rows: list[dict[str, str]] = []
+        for index, values_row in enumerate(values[1:], start=2):
+            if not any(values_row):
+                continue
+            row: dict[str, str] = {}
+            occurrences: dict[str, int] = {}
+            for column, header in enumerate(headers):
+                if not header:
+                    continue
+                occurrences[header] = occurrences.get(header, 0) + 1
+                key = header if occurrences[header] == 1 else f"{header} ({occurrences[header]})"
+                row[key] = str(values_row[column]).strip() if column < len(values_row) else ""
+            row["_source_row"] = str(index)
+            rows.append(row)
+        return rows
+
+    def append_tracking_row(
+        self,
+        *,
+        request_id: str,
+        source_key: str,
+        payload: dict[str, str],
+        channel_id: int,
+        channel_url: str,
+    ) -> TrackingRow:
+        """Append the initial operational record to the central tracker."""
+        tracker = self.ensure_tracking_sheet()
+        request_type = self._answer(payload, "Request Type")
+        timestamp = self._answer(payload, "Timestamp")
+        requester_name = self._answer(payload, "Requestors Name:")
+        docket_id = self._answer(payload, "Please indicate the Docket Name/ID.")
+        destination = "Private Off-Docket ticket"
+        row = [
+            request_id, source_key, request_type, "Awaiting Claim", timestamp, requester_name,
+            "", self._answer(payload, "Discord Username", "Your Discord Name"), docket_id,
+            destination, str(channel_id), channel_url, "", "", "", "", "", "", "Pending",
+            "", "", "", "0", "", self._answer(payload, "Evidence Links"),
+        ]
+        response = self._sheets_service().spreadsheets().values().append(
+            spreadsheetId=tracker.id,
+            range="Requests!A:Y",
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": [row]},
+        ).execute()
+        updated_range = response["updates"]["updatedRange"]
+        row_number = int(updated_range.rsplit("!", 1)[-1].split(":", 1)[0][1:])
+        return TrackingRow(spreadsheet_id=tracker.id, row_number=row_number)
+
+    def mark_tracking_row_claimed(self, tracking: TrackingRow, user_id: int) -> None:
+        """Record the verified Discord identity and claim state in the tracker row."""
+        self._sheets_service().spreadsheets().values().batchUpdate(
+            spreadsheetId=tracking.spreadsheet_id,
+            body={
+                "valueInputOption": "RAW",
+                "data": [
+                    {"range": f"Requests!D{tracking.row_number}", "values": [["Awaiting Review"]]},
+                    {"range": f"Requests!G{tracking.row_number}", "values": [[str(user_id)]]},
+                ],
+            },
+        ).execute()
+
+    def _sheets_service(self):
+        credentials = self._credentials()
+        return build("sheets", "v4", credentials=credentials, cache_discovery=False)
+
+    def _credentials(self):
+        if not self.service_account_file.is_file():
+            raise FileNotFoundError(
+                "The Google service-account file was not found at the configured server path."
+            )
+        return service_account.Credentials.from_service_account_file(
+            self.service_account_file,
+            scopes=[
+                "https://www.googleapis.com/auth/drive",
+                "https://www.googleapis.com/auth/spreadsheets",
+            ],
+        )
+
+    @staticmethod
+    def _answer(payload: dict[str, str], *names: str) -> str:
+        for name in names:
+            if payload.get(name):
+                return payload[name]
+        return ""

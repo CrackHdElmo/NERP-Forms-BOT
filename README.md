@@ -39,8 +39,10 @@ The initial slash-command surface is deliberately small: `/bot-status` verifies 
 selected environment and confirms that the bot is connected to the expected guild.
 `/google-workspace-status` is restricted to configured bot administrators; it verifies
 the protected Google credential and creates (or finds) the test request tracker in the
-shared Drive folder. Google Form intake, document generation, and ticket/docket creation
-will be added in subsequent milestones.
+shared Drive folder. `/court-order-sync` imports new Court Order Form response rows into
+staff-only off-docket tickets. A requester then runs `/claim-court-order`; the bot verifies
+their submitted Discord username through that interaction before granting ticket access.
+Document generation and approval actions will be added in subsequent milestones.
 
 ## Deployment
 

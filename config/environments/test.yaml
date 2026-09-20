@@ -19,6 +19,11 @@ google_workspace:
   # This folder is inside the NERP DOJ BOT - Test Shared drive and is not a secret.
   test_drive_folder_id: 1tSB26NtY7wX5I0yRhUfVrRXj0B3ADItb
 
+court_order_intake:
+  form_url: https://docs.google.com/forms/d/1Z-uWBoZLQVe6rbXhT_L_8oZa-zRKtL3P-CgL53HCJX4/edit
+  response_spreadsheet_id: 16FKJRd3BAVGH5tl2auDfMi6oZXE2nhnvxfPFD-X6uu8
+  response_sheet_name: Form Responses 1
+
 roles:
   administrators:
     - 1414109505805094938 # Mod (test server)

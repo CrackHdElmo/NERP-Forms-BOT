@@ -12,3 +12,5 @@ def test_altitude_government_profile_loads() -> None:
     assert config.categories["off_docket_tickets"] == 1547691431185879180
     assert config.workflows["attorney_request"].mode == "private_ticket_channel"
     assert config.google_workspace.test_drive_folder_id == "1tSB26NtY7wX5I0yRhUfVrRXj0B3ADItb"
+    assert config.court_order_intake is not None
+    assert config.court_order_intake.response_sheet_name == "Form Responses 1"

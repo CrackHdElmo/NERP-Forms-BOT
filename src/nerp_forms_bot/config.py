@@ -32,6 +32,16 @@ class GoogleWorkspaceConfig(BaseModel):
     test_drive_folder_id: str | None = None
 
 
+class CourtOrderIntakeConfig(BaseModel):
+    """The non-secret Google Form response source for the first test workflow."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    form_url: str
+    response_spreadsheet_id: str
+    response_sheet_name: str
+
+
 class EnvironmentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -42,6 +52,7 @@ class EnvironmentConfig(BaseModel):
     roles: dict[str, list[int]] = Field(default_factory=dict)
     workflows: dict[str, WorkflowConfig] = Field(default_factory=dict)
     google_workspace: GoogleWorkspaceConfig = Field(default_factory=GoogleWorkspaceConfig)
+    court_order_intake: CourtOrderIntakeConfig | None = None
     test_requester_user_id: int | None = None
 
 
