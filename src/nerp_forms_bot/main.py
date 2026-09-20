@@ -952,21 +952,30 @@ class NerpFormsBot(discord.Client):
             return
 
         me = channel.guild.me
+        if me:
+            await channel.set_permissions(
+                me,
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                attach_files=True,
+            )
+        await channel.send(
+            "This request is closed. A staff case record was posted to **#doj-case-records**."
+        )
         for target in channel.overwrites:
-            if isinstance(target, discord.Member) and (not me or target.id != me.id):
-                await channel.set_permissions(
-                    target,
-                    view_channel=True,
-                    send_messages=False,
-                    attach_files=False,
-                    embed_links=False,
-                )
+            is_non_bot_member = isinstance(target, discord.Member) and (
+                not me or target.id != me.id
+            )
+            if is_non_bot_member or isinstance(target, discord.Role):
+                overwrite = channel.overwrites_for(target)
+                overwrite.send_messages = False
+                overwrite.attach_files = False
+                overwrite.embed_links = False
+                await channel.set_permissions(target, overwrite=overwrite)
         await channel.edit(
             topic=f"Closed NERP request {submission.request_id} at {closed_at}.",
             reason=f"NERP Forms BOT closed request {submission.request_id}",
-        )
-        await channel.send(
-            "This request is closed. A staff case record was posted to **#doj-case-records**."
         )
 
     async def _create_court_order_ticket(self, submission: Submission) -> discord.TextChannel:
