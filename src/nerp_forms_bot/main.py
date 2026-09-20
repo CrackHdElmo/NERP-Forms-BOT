@@ -266,6 +266,69 @@ class NerpFormsBot(discord.Client):
             )
 
         @self.tree.command(
+            name="add-court-order-member",
+            description="Give a server member access to this private Court Order ticket.",
+            guild=guild,
+        )
+        @app_commands.describe(member="The server member who should be allowed into this ticket.")
+        async def add_court_order_member(
+            interaction: discord.Interaction,
+            member: discord.Member,
+        ) -> None:
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.response.send_message(
+                    "Run this command inside the private Court Order ticket.", ephemeral=True
+                )
+                return
+            submission = await self.store.get_by_channel_id(interaction.channel.id)
+            if not submission or submission.workflow != "court_order":
+                await interaction.response.send_message(
+                    "This channel is not a Court Order request ticket.", ephemeral=True
+                )
+                return
+            if not (
+                self._is_administrator(interaction)
+                or interaction.user.id == submission.claimed_user_id
+            ):
+                await interaction.response.send_message(
+                    "Only the verified requester or a configured bot administrator can add a member.",
+                    ephemeral=True,
+                )
+                return
+            if member.bot:
+                await interaction.response.send_message(
+                    "Bot accounts cannot be added through this command.", ephemeral=True
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                await interaction.channel.set_permissions(
+                    member,
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    attach_files=True,
+                    embed_links=True,
+                )
+            except discord.Forbidden:
+                LOGGER.warning("The bot lacks permission to add %s to ticket %s", member.id, interaction.channel.id)
+                await interaction.followup.send(
+                    "The bot cannot change access for this ticket. A DOJ administrator must give the "
+                    "bot role Discord **Manage Roles** permission, then retry.",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.channel.send(
+                f"{interaction.user.mention} granted {member.mention} access to this Court Order request."
+            )
+            await interaction.followup.send(
+                f"{member.mention} can now view, message, and attach files in {interaction.channel.mention}.",
+                ephemeral=True,
+            )
+
+        @self.tree.command(
             name="generate-arrest-warrant",
             description="Create a one-page Arrest Warrant from a claimed Court Order request.",
             guild=guild,
