@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     nerp_environment: str = "test"
     google_service_account_file: str | None = None
     database_url: str = "sqlite+aiosqlite:///./data/nerp_forms_bot.db"
+    google_forms_poll_interval_seconds: int = 60
 
 
 class NerpFormsBot(discord.Client):
@@ -39,6 +40,8 @@ class NerpFormsBot(discord.Client):
         self.settings = settings
         self.tree = app_commands.CommandTree(self)
         self.store = SubmissionStore(settings.database_url)
+        self._sync_lock = asyncio.Lock()
+        self._court_order_poll_task: asyncio.Task[None] | None = None
 
     def _is_administrator(self, interaction: discord.Interaction) -> bool:
         member = interaction.user
@@ -210,35 +213,50 @@ class NerpFormsBot(discord.Client):
                 )
                 return
             await interaction.response.defer(ephemeral=True, thinking=True)
-            await channel.set_permissions(
-                interaction.user,
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                attach_files=True,
-            )
-            await self.store.mark_claimed(submission.id, interaction.user.id)
-            if submission.tracker_spreadsheet_id and submission.tracker_row:
-                await asyncio.to_thread(
-                    GoogleWorkspaceService(
-                        self.settings.google_service_account_file or "",
-                        self.environment.google_workspace.test_drive_folder_id or "",
-                    ).mark_tracking_row_claimed,
-                    TrackingRow(submission.tracker_spreadsheet_id, submission.tracker_row),
-                    interaction.user.id,
+            try:
+                await channel.set_permissions(
+                    interaction.user,
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    attach_files=True,
                 )
-            await channel.send(
-                f"{interaction.user.mention} has verified ownership of this Court Order request. "
-                "Please upload any documents, screenshots, media, or evidence directly in this ticket."
-            )
+                await self.store.mark_claimed(submission.id, interaction.user.id)
+                if submission.tracker_spreadsheet_id and submission.tracker_row:
+                    await asyncio.to_thread(
+                        GoogleWorkspaceService(
+                            self.settings.google_service_account_file or "",
+                            self.environment.google_workspace.test_drive_folder_id or "",
+                        ).mark_tracking_row_claimed,
+                        TrackingRow(submission.tracker_spreadsheet_id, submission.tracker_row),
+                        interaction.user.id,
+                    )
+                await channel.send(
+                    f"{interaction.user.mention} has verified ownership of this Court Order request. "
+                    "Please upload any documents, screenshots, media, or evidence directly in this ticket."
+                )
+            except discord.Forbidden:
+                LOGGER.warning("The bot lacks permission to grant claimant access to %s", channel.id)
+                await interaction.followup.send(
+                    "The bot cannot yet grant access to this private ticket. A DOJ administrator "
+                    "must give the bot role the Discord **Manage Roles** permission, then retry.",
+                    ephemeral=True,
+                )
+                return
             await interaction.followup.send(
                 f"Your private Court Order request is ready: {channel.mention}", ephemeral=True
             )
 
         await self.tree.sync(guild=guild)
+        self._court_order_poll_task = asyncio.create_task(self._court_order_poll_loop())
 
     async def _sync_court_order_responses(self) -> int:
         """Read new source rows once and route each one to a private ticket."""
+        async with self._sync_lock:
+            return await self._sync_court_order_responses_locked()
+
+    async def _sync_court_order_responses_locked(self) -> int:
+        """Perform the source scan while excluding concurrent manual or automatic scans."""
         intake = self.environment.court_order_intake
         if not intake or not self.settings.google_service_account_file:
             raise RuntimeError("Court Order Form intake is not configured on this host.")
@@ -278,6 +296,19 @@ class NerpFormsBot(discord.Client):
                 await self.store.mark_failed(submission.id)
                 raise
         return created
+
+    async def _court_order_poll_loop(self) -> None:
+        """Import new Court Order responses at a bounded interval after the bot connects."""
+        await self.wait_until_ready()
+        interval = max(60, self.settings.google_forms_poll_interval_seconds)
+        while not self.is_closed():
+            try:
+                created = await self._sync_court_order_responses()
+                if created:
+                    LOGGER.info("Automatically created %s Court Order ticket(s)", created)
+            except Exception:
+                LOGGER.exception("Automatic Court Order Form synchronization failed")
+            await asyncio.sleep(interval)
 
     async def _baseline_court_order_responses(self) -> int:
         """Suppress historical rows before enabling active intake for a copied Form."""
@@ -324,12 +355,19 @@ class NerpFormsBot(discord.Client):
         me = guild.me
         if not me:
             raise RuntimeError("The bot member was not available in the configured guild.")
-        overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            me: discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, read_message_history=True, manage_channels=True
-            ),
-        }
+        overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = dict(
+            category.overwrites
+        )
+        for target, overwrite in overwrites.items():
+            if isinstance(target, discord.Role) and target != guild.default_role:
+                overwrite.view_channel = False
+        overwrites[guild.default_role] = discord.PermissionOverwrite(view_channel=False)
+        overwrites[me] = discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            manage_channels=True,
+        )
         for group in ("administrators", "judges", "prosecutors", "defense_attorneys"):
             for role_id in self.environment.roles.get(group, []):
                 role = guild.get_role(role_id)

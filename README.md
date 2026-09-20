@@ -42,6 +42,10 @@ the protected Google credential and creates (or finds) the test request tracker 
 shared Drive folder. `/court-order-sync` imports new Court Order Form response rows into
 staff-only off-docket tickets. A requester then runs `/claim-court-order`; the bot verifies
 their submitted Discord username through that interaction before granting ticket access.
+The bot also checks the linked response Sheet automatically every 60 seconds by default;
+`/court-order-sync` remains available to administrators as an immediate reconciliation and
+retry command. Set `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` to a larger value (for example,
+`120`) in protected host settings when a slower polling interval is preferred.
 Document generation and approval actions will be added in subsequent milestones.
 
 ## Deployment

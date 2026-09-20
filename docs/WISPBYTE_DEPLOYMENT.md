@@ -79,4 +79,10 @@ single `NERP Forms BOT - Test Requests` tracker and returns its Google Sheets li
   test-server command, then restart once. Confirm the bot is installed in Altitude
   Government and `NERP_ENVIRONMENT=test` is present.
 - **Permission error in a channel:** verify the bot's per-category/channel permissions;
-  it should not need Administrator.
+  it should not need Administrator. For `/claim-court-order`, its assigned Discord role
+  must have **Manage Roles** so it can add the verified requester to that private ticket.
+  Keep that bot role above any roles whose channel access it must manage.
+- **Form submission has not appeared yet:** the bot checks the linked response Sheet every
+  60 seconds by default. An administrator can use `/court-order-sync` for an immediate
+  retry, or set `GOOGLE_FORMS_POLL_INTERVAL_SECONDS=120` in Wispbyte Environment Variables
+  to use a two-minute interval.
