@@ -52,9 +52,17 @@ Forum permissions and cannot grant access to one individual post.
 `/close-ticket` can be used by the verified requester, configured judicial roles, the configured
 Attorney General role, or a server/bot administrator. On its first use, the bot creates a
 read-only `#doj-case-records` channel beneath Court Administration with access limited to the
-configured DOJ and PD staff roles. Each closure posts a staff synopsis there, locks a private
-ticket for participants, or archives and locks a tracked Forum post. The original ticket/post
-remains available to staff as the detailed source record.
+configured DOJ and PD staff roles. Each closure posts a staff synopsis there, including all
+Form-submitted evidence links and any recorded approval or denial identity/notes, before it
+removes the source private ticket. A tracked Forum/Docket post is archived and locked instead
+of deleted so the shared docket record remains intact.
+
+Within a Court Order ticket, a configured Judge or bot administrator can use
+`/deny-arrest-warrant` with required denial notes. The denial, issuing official, and timestamp
+are retained. The ticket deliberately stays open so the requester can submit a corrected Form;
+entering the existing `COR-######` request ID (or the existing bot-managed ticket name) in the
+Form's **Docket / Off-Docket Name/ID** answer attaches the new submission to that existing
+ticket rather than creating another private channel.
 The bot also checks the linked response Sheet automatically every 60 seconds by default;
 `/court-order-sync` remains available to administrators as an immediate reconciliation and
 retry command. Set `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` to a larger value (for example,

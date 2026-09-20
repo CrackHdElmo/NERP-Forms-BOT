@@ -69,6 +69,10 @@ class NerpFormsBot(discord.Client):
             role.id in judge_role_ids for role in member.roles
         )
 
+    def _can_deny_warrant(self, interaction: discord.Interaction) -> bool:
+        """A judicial denial has the same authority boundary as a judicial approval."""
+        return self._can_approve_warrant(interaction)
+
     def _role_ids(self, *role_groups: str) -> set[int]:
         """Resolve configured role groups while allowing test and production aliases."""
         return {
@@ -110,6 +114,13 @@ class NerpFormsBot(discord.Client):
             "high_command_doj",
             "paralegals",
             "attorney_general",
+        )
+
+    def _existing_docket_reference(self, payload: dict[str, str]) -> str:
+        """Read either version of the Form's Docket / Off-Docket reference question."""
+        return self._answer_prefix(payload, "Please indicate the Docket or Off-Docket Name/ID") or self._answer(
+            payload,
+            "Please indicate the Docket Name/ID.",
         )
 
     async def setup_hook(self) -> None:
@@ -420,15 +431,14 @@ class NerpFormsBot(discord.Client):
             closed_at = datetime.now(UTC).replace(microsecond=0).isoformat()
             try:
                 records_channel = await self._get_or_create_case_records_channel()
-                await records_channel.send(
-                    embed=self._case_record_embed(
-                        submission=submission,
-                        closed_by=interaction.user,
-                        closed_at=closed_at,
-                        closure_note=closure_note,
-                    )
-                )
-                await self._close_request_channel(interaction.channel, submission, closed_at)
+                for record_embed in self._case_record_embeds(
+                    submission=submission,
+                    closed_by=interaction.user,
+                    closed_at=closed_at,
+                    closure_note=closure_note,
+                    source_deleted=isinstance(interaction.channel, discord.TextChannel),
+                ):
+                    await records_channel.send(embed=record_embed)
                 recorded = await self.store.mark_closed(
                     submission_id=submission.id,
                     closer_user_id=interaction.user.id,
@@ -436,6 +446,7 @@ class NerpFormsBot(discord.Client):
                     closed_at=closed_at,
                     closed_note=closure_note,
                 )
+                await self._finalize_request_channel(interaction.channel, submission)
             except discord.Forbidden:
                 LOGGER.warning("The bot lacks permission to close request %s", submission.request_id)
                 await interaction.followup.send(
@@ -635,6 +646,13 @@ class NerpFormsBot(discord.Client):
                     ephemeral=True,
                 )
                 return
+            if submission.status == "denied":
+                await interaction.response.send_message(
+                    "This Arrest Warrant was denied. Submit a corrected Court Order Form that references "
+                    f"**{submission.request_id}** to continue in this request ticket.",
+                    ephemeral=True,
+                )
+                return
 
             await interaction.response.defer(ephemeral=True, thinking=True)
             replacements, validation_error = self._arrest_warrant_replacements(submission=submission)
@@ -728,6 +746,86 @@ class NerpFormsBot(discord.Client):
                 ephemeral=True,
             )
 
+        @self.tree.command(
+            name="deny-arrest-warrant",
+            description="Judicially deny this Arrest Warrant and record the required reason.",
+            guild=guild,
+        )
+        @app_commands.describe(denial_notes="Required reason or corrective guidance for the denial.")
+        async def deny_arrest_warrant(
+            interaction: discord.Interaction,
+            denial_notes: str,
+        ) -> None:
+            if not self._can_deny_warrant(interaction):
+                await interaction.response.send_message(
+                    "Only a configured Judge or bot administrator can deny an Arrest Warrant.",
+                    ephemeral=True,
+                )
+                return
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.response.send_message(
+                    "Run this command inside the private Court Order ticket.", ephemeral=True
+                )
+                return
+            denial_notes = denial_notes.strip()
+            if not denial_notes or len(denial_notes) > 1000:
+                await interaction.response.send_message(
+                    "Denial notes are required and must be 1,000 characters or fewer.", ephemeral=True
+                )
+                return
+            submission = await self.store.get_by_channel_id(interaction.channel.id)
+            if not submission or submission.workflow != "court_order":
+                await interaction.response.send_message(
+                    "This channel is not a Court Order request ticket.", ephemeral=True
+                )
+                return
+            if submission.status == "closed":
+                await interaction.response.send_message(
+                    "This request is already closed and cannot be denied.", ephemeral=True
+                )
+                return
+            if submission.status == "approved":
+                await interaction.response.send_message(
+                    "This Arrest Warrant was already approved and cannot be denied.", ephemeral=True
+                )
+                return
+            if submission.status == "denied":
+                await interaction.response.send_message(
+                    "This Arrest Warrant has already been denied. A corrected Form submission can "
+                    "reference this request ID to continue here.",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            denied_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+            denier_name = interaction.user.display_name.strip() or interaction.user.name
+            recorded = await self.store.mark_warrant_denied(
+                submission_id=submission.id,
+                denier_user_id=interaction.user.id,
+                denier_name=denier_name,
+                denied_at=denied_at,
+                denial_note=denial_notes,
+            )
+            if not recorded:
+                await interaction.followup.send(
+                    "The denial could not be recorded because this request changed state. Please retry "
+                    "only after staff review the ticket.",
+                    ephemeral=True,
+                )
+                return
+            await interaction.channel.send(
+                f"**Arrest Warrant denied** by {interaction.user.mention}.\n"
+                f"**Denial notes:** {denial_notes}\n\n"
+                "This ticket remains open. To submit a correction, complete a new Court Order Form and "
+                f"enter **{submission.request_id}** in the Docket / Off-Docket Name/ID field; the bot "
+                "will post the new submission in this same ticket."
+            )
+            await interaction.followup.send(
+                f"Denied **{submission.request_id}** and recorded the denial notes in this ticket.",
+                ephemeral=True,
+            )
+
         await self.tree.sync(guild=guild)
         self._court_order_poll_task = asyncio.create_task(self._court_order_poll_loop())
 
@@ -760,7 +858,16 @@ class NerpFormsBot(discord.Client):
             if not submission:
                 continue
             try:
-                channel = await self._create_court_order_ticket(submission)
+                reference = self._existing_docket_reference(row)
+                channel = await self._find_reusable_court_order_ticket(reference)
+                if channel:
+                    await self._post_court_order_intake(
+                        channel,
+                        submission,
+                        existing_reference=reference,
+                    )
+                else:
+                    channel = await self._create_court_order_ticket(submission)
                 tracking = await asyncio.to_thread(
                     workspace.append_tracking_row,
                     request_id=submission.request_id,
@@ -878,15 +985,16 @@ class NerpFormsBot(discord.Client):
         await self.store.set_resource_channel_id("doj_case_records", channel.id)
         return channel
 
-    def _case_record_embed(
+    def _case_record_embeds(
         self,
         *,
         submission: Submission,
         closed_by: discord.abc.User,
         closed_at: str,
         closure_note: str | None,
-    ) -> discord.Embed:
-        """Create a staff-only synopsis without copying private ticket evidence into the record."""
+        source_deleted: bool,
+    ) -> list[discord.Embed]:
+        """Create staff-only records, including all Form-submitted evidence links."""
         classified_answer = self._answer_prefix(
             submission.payload,
             'Has the Case or it\'s evidence been designated "Classified"',
@@ -897,6 +1005,7 @@ class NerpFormsBot(discord.Client):
         charges = self._answers_for_prefix(
             submission.payload, "Initial Charges To Be Filed Against Subject:"
         )
+        evidence_links = self._answers_for_prefix(submission.payload, "Please include any evidence")
         subject_lines = [
             f"{number}. {self._value_at(subjects, number - 1)} "
             f"({self._value_at(citizen_ids, number - 1)}) — "
@@ -905,8 +1014,10 @@ class NerpFormsBot(discord.Client):
         ]
         embed = discord.Embed(
             title=f"Closed {submission.workflow.replace('_', ' ').title()} — {submission.request_id}",
-            description="Permanent staff case record. Detailed evidence and attachments remain in the "
-            "closed source request.",
+            description=(
+                "Permanent staff case record. Form-submitted evidence links are recorded below; "
+                "uploaded attachments remain in the source request."
+            ),
             color=discord.Color.dark_grey(),
             timestamp=datetime.fromisoformat(closed_at),
         )
@@ -916,7 +1027,7 @@ class NerpFormsBot(discord.Client):
                 f"**Type:** {self._answer(submission.payload, 'Request Type') or submission.workflow}\n"
                 f"**Requester:** {self._answer(submission.payload, 'Requestors Name:') or 'N/A'}\n"
                 f"**Agency:** {self._answer(submission.payload, 'Requesting Agency:') or 'N/A'}\n"
-                f"**Docket:** {self._answer(submission.payload, 'Please indicate the Docket Name/ID.') or 'N/A'}"
+                f"**Docket / Off-Docket:** {self._existing_docket_reference(submission.payload) or 'N/A'}"
             ),
             inline=False,
         )
@@ -925,24 +1036,58 @@ class NerpFormsBot(discord.Client):
             name="Status at closure", value=submission.status.replace("_", " ").title(), inline=True
         )
         embed.add_field(name="Closed by", value=closed_by.mention, inline=True)
+        if submission.approved_by_name:
+            embed.add_field(
+                name="Judicial decision",
+                value=f"Approved by <@{submission.approved_by_user_id}> on {submission.approved_at}",
+                inline=False,
+            )
+        elif submission.denied_by_name:
+            decision = f"Denied by <@{submission.denied_by_user_id}> on {submission.denied_at}"
+            if submission.denial_note:
+                decision += f"\n**Denial notes:** {submission.denial_note}"
+            embed.add_field(name="Judicial decision", value=decision[:1024], inline=False)
         if subject_lines:
             embed.add_field(name="Subjects", value="\n".join(subject_lines)[:1024], inline=False)
         if closure_note:
             embed.add_field(name="Closure note", value=closure_note, inline=False)
-        if submission.discord_channel_id:
+        if source_deleted:
+            embed.add_field(
+                name="Source request",
+                value="Original private ticket deleted after this staff record was posted.",
+                inline=False,
+            )
+        elif submission.discord_channel_id:
             embed.add_field(
                 name="Source request", value=f"<#{submission.discord_channel_id}>", inline=False
             )
         embed.set_footer(text=f"Closed at {closed_at}")
-        return embed
+        records = [embed]
+        for number, evidence in enumerate(evidence_links, start=1):
+            if evidence.strip().upper() in {"", "N/A", "NA", "NONE"}:
+                continue
+            for part, chunk in enumerate(self._discord_embed_chunks(evidence), start=1):
+                continuation = f" (continued {part})" if part > 1 else ""
+                evidence_embed = discord.Embed(
+                    title=f"Submitted evidence — {submission.request_id}",
+                    color=discord.Color.dark_grey(),
+                    timestamp=datetime.fromisoformat(closed_at),
+                )
+                evidence_embed.add_field(
+                    name=f"Subject {number} evidence links{continuation}",
+                    value=chunk,
+                    inline=False,
+                )
+                evidence_embed.set_footer(text=f"Staff record for {submission.request_id}")
+                records.append(evidence_embed)
+        return records
 
-    async def _close_request_channel(
+    async def _finalize_request_channel(
         self,
         channel: discord.TextChannel | discord.Thread,
         submission: Submission,
-        closed_at: str,
     ) -> None:
-        """Lock a private ticket or archive a Forum post after its staff record is written."""
+        """Remove a private ticket or archive and lock a tracked Forum post after logging."""
         if isinstance(channel, discord.Thread):
             await channel.edit(
                 archived=True,
@@ -950,31 +1095,7 @@ class NerpFormsBot(discord.Client):
                 reason=f"NERP Forms BOT closed request {submission.request_id}",
             )
             return
-
-        me = channel.guild.me
-        if me:
-            await channel.set_permissions(
-                me,
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                attach_files=True,
-            )
-        await channel.send(
-            "This request is closed. A staff case record was posted to **#doj-case-records**."
-        )
-        for target in channel.overwrites:
-            is_non_bot_member = isinstance(target, discord.Member) and (
-                not me or target.id != me.id
-            )
-            if is_non_bot_member or isinstance(target, discord.Role):
-                overwrite = channel.overwrites_for(target)
-                overwrite.send_messages = False
-                overwrite.attach_files = False
-                overwrite.embed_links = False
-                await channel.set_permissions(target, overwrite=overwrite)
-        await channel.edit(
-            topic=f"Closed NERP request {submission.request_id} at {closed_at}.",
+        await channel.delete(
             reason=f"NERP Forms BOT closed request {submission.request_id}",
         )
 
@@ -1017,6 +1138,63 @@ class NerpFormsBot(discord.Client):
             topic=f"Court Order request {submission.request_id}; awaiting claimant verification.",
             reason=f"NERP Forms BOT Court Order intake {submission.request_id}",
         )
+        await self._post_court_order_intake(channel, submission)
+        return channel
+
+    async def _find_reusable_court_order_ticket(
+        self, reference: str
+    ) -> discord.TextChannel | None:
+        """Resolve an open bot-managed Court Order ticket from its request ID or channel name."""
+        normalized = reference.strip().lower()
+        if not normalized:
+            return None
+        request_match = re.search(r"\bcor-\d{6}\b", normalized, flags=re.IGNORECASE)
+        candidate: Submission | None = None
+        if request_match:
+            candidate = await self.store.get_by_request_id(request_match.group(0))
+
+        guild = self.get_guild(self.environment.guild.id)
+        if candidate and candidate.status != "closed" and guild:
+            channel = guild.get_channel(candidate.discord_channel_id or 0)
+            if isinstance(channel, discord.TextChannel):
+                return channel
+
+        # A custom docket/off-docket reference (rather than COR-######) can be
+        # reused when it was recorded on an earlier still-open Court Order request.
+        if guild:
+            for active_submission in await self.store.find_open_submissions("court_order"):
+                if self._existing_docket_reference(active_submission.payload).strip().lower() != normalized:
+                    continue
+                channel = guild.get_channel(active_submission.discord_channel_id or 0)
+                if isinstance(channel, discord.TextChannel):
+                    return channel
+
+        # A user may supply the existing bot-managed channel name instead of COR-######.
+        channel_name = normalized.removeprefix("#")
+        if guild:
+            for channel in guild.text_channels:
+                if channel.name != channel_name:
+                    continue
+                ticket_submission = await self.store.get_by_channel_id(channel.id)
+                if ticket_submission and ticket_submission.workflow == "court_order" and ticket_submission.status != "closed":
+                    return channel
+        return None
+
+    async def _post_court_order_intake(
+        self,
+        channel: discord.TextChannel,
+        submission: Submission,
+        *,
+        existing_reference: str | None = None,
+    ) -> None:
+        """Post one complete Court Order intake to either a new or existing private ticket."""
+        if existing_reference:
+            await channel.send(
+                f"**Corrected / additional Court Order submission received** as "
+                f"**{submission.request_id}**, linked to existing reference "
+                f"**{existing_reference}**. The requester must claim this new submission with "
+                "`/claim-court-order` before it can be generated or approved."
+            )
         embed = discord.Embed(
             title=f"Court Order Request {submission.request_id}",
             description="Awaiting requester verification through `/claim-court-order`.",
@@ -1026,9 +1204,13 @@ class NerpFormsBot(discord.Client):
             ("Requester", "Requestors Name:"),
             ("Requesting agency", "Requesting Agency:"),
             ("Request type", "Request Type"),
-            ("Existing docket", "Please indicate the Docket Name/ID."),
+            ("Existing docket / off-docket", "__existing_reference__"),
         ):
-            value = self._answer_prefix(submission.payload, field)
+            value = (
+                self._existing_docket_reference(submission.payload)
+                if field == "__existing_reference__"
+                else self._answer_prefix(submission.payload, field)
+            )
             if value:
                 embed.add_field(name=label, value=value[:1024], inline=False)
         await channel.send(embed=embed)
@@ -1042,7 +1224,6 @@ class NerpFormsBot(discord.Client):
                         color=discord.Color.dark_blue(),
                     )
                 )
-        return channel
 
     def _arrest_warrant_replacements(
         self,
@@ -1073,9 +1254,7 @@ class NerpFormsBot(discord.Client):
 
         replacements = {
             "{{REQUEST_ID}}": submission.request_id,
-            "{{DOCKET_ID}}": self._answer(
-                submission.payload, "Please indicate the Docket Name/ID."
-            ) or "N/A",
+            "{{DOCKET_ID}}": self._existing_docket_reference(submission.payload) or "N/A",
             "{{CLASSIFIED}}": classified_designation,
             "{{REQUESTER_NAME}}": self._answer(submission.payload, "Requestors Name:") or "N/A",
             "{{REQUESTING_AGENCY}}": self._answer(submission.payload, "Requesting Agency:") or "N/A",
@@ -1138,6 +1317,11 @@ class NerpFormsBot(discord.Client):
     @staticmethod
     def _discord_text_chunks(value: str, maximum_length: int = 3900) -> list[str]:
         """Split long evidence/probable-cause details without silently truncating them."""
+        return [value[start : start + maximum_length] for start in range(0, len(value), maximum_length)]
+
+    @staticmethod
+    def _discord_embed_chunks(value: str, maximum_length: int = 1000) -> list[str]:
+        """Keep every submitted evidence link within Discord's per-field limit."""
         return [value[start : start + maximum_length] for start in range(0, len(value), maximum_length)]
 
     @staticmethod

@@ -26,6 +26,10 @@ class Submission:
     approved_by_name: str | None
     approved_at: str | None
     approved_document_id: str | None
+    denied_by_user_id: int | None
+    denied_by_name: str | None
+    denied_at: str | None
+    denial_note: str | None
     closed_by_user_id: int | None
     closed_by_name: str | None
     closed_at: str | None
@@ -84,6 +88,10 @@ class SubmissionStore:
             ("approved_by_name", "TEXT"),
             ("approved_at", "TEXT"),
             ("approved_document_id", "TEXT"),
+            ("denied_by_user_id", "INTEGER"),
+            ("denied_by_name", "TEXT"),
+            ("denied_at", "TEXT"),
+            ("denial_note", "TEXT"),
             ("closed_by_user_id", "INTEGER"),
             ("closed_by_name", "TEXT"),
             ("closed_at", "TEXT"),
@@ -134,6 +142,10 @@ class SubmissionStore:
                 approved_by_name=None,
                 approved_at=None,
                 approved_document_id=None,
+                denied_by_user_id=None,
+                denied_by_name=None,
+                denied_at=None,
+                denial_note=None,
                 closed_by_user_id=None,
                 closed_by_name=None,
                 closed_at=None,
@@ -221,14 +233,30 @@ class SubmissionStore:
         return self._submission_from_row(row) if row else None
 
     async def get_by_channel_id(self, channel_id: int) -> Submission | None:
-        """Find the one request the current private ticket represents."""
+        """Find the most recent request assigned to the current ticket or Forum post."""
         async with aiosqlite.connect(self.path) as database:
             database.row_factory = aiosqlite.Row
             cursor = await database.execute(
-                "SELECT * FROM submissions WHERE discord_channel_id = ?", (channel_id,)
+                "SELECT * FROM submissions WHERE discord_channel_id = ? ORDER BY id DESC LIMIT 1",
+                (channel_id,),
             )
             row = await cursor.fetchone()
         return self._submission_from_row(row) if row else None
+
+    async def find_open_submissions(self, workflow: str) -> list[Submission]:
+        """Return active requests so the workflow can resolve a user-supplied case reference."""
+        async with aiosqlite.connect(self.path) as database:
+            database.row_factory = aiosqlite.Row
+            cursor = await database.execute(
+                """
+                SELECT * FROM submissions
+                WHERE workflow = ? AND status != 'closed' AND discord_channel_id IS NOT NULL
+                ORDER BY id DESC
+                """,
+                (workflow,),
+            )
+            rows = await cursor.fetchall()
+        return [self._submission_from_row(row) for row in rows]
 
     async def mark_warrant_approved(
         self,
@@ -249,6 +277,29 @@ class SubmissionStore:
                 WHERE id = ? AND status != 'approved'
                 """,
                 (approver_user_id, approver_name, approved_at, approved_document_id, submission_id),
+            )
+            await database.commit()
+        return cursor.rowcount == 1
+
+    async def mark_warrant_denied(
+        self,
+        *,
+        submission_id: int,
+        denier_user_id: int,
+        denier_name: str,
+        denied_at: str,
+        denial_note: str,
+    ) -> bool:
+        """Persist a judicial denial and retain the ticket for a corrected resubmission."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute(
+                """
+                UPDATE submissions
+                SET status = 'denied', denied_by_user_id = ?, denied_by_name = ?,
+                    denied_at = ?, denial_note = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status NOT IN ('approved', 'denied', 'closed')
+                """,
+                (denier_user_id, denier_name, denied_at, denial_note, submission_id),
             )
             await database.commit()
         return cursor.rowcount == 1
@@ -314,6 +365,10 @@ class SubmissionStore:
             approved_by_name=row["approved_by_name"],
             approved_at=row["approved_at"],
             approved_document_id=row["approved_document_id"],
+            denied_by_user_id=row["denied_by_user_id"],
+            denied_by_name=row["denied_by_name"],
+            denied_at=row["denied_at"],
+            denial_note=row["denial_note"],
             closed_by_user_id=row["closed_by_user_id"],
             closed_by_name=row["closed_by_name"],
             closed_at=row["closed_at"],

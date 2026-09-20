@@ -27,6 +27,10 @@ def _submission(payload: dict[str, str]) -> Submission:
         approved_by_name=None,
         approved_at=None,
         approved_document_id=None,
+        denied_by_user_id=None,
+        denied_by_name=None,
+        denied_at=None,
+        denial_note=None,
         closed_by_user_id=None,
         closed_by_name=None,
         closed_at=None,
@@ -100,3 +104,11 @@ def test_private_ticket_renders_each_submitted_subject() -> None:
     assert "Charge two" in details[1]
     assert "Cause two" in details[1]
     assert "evidence-two" in details[1]
+
+
+def test_docket_or_off_docket_reference_accepts_the_updated_form_question() -> None:
+    payload = {
+        "Please indicate the Docket or Off-Docket Name/ID .": "COR-000006",
+    }
+
+    assert _bot()._existing_docket_reference(payload) == "COR-000006"
