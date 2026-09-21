@@ -2297,13 +2297,23 @@ class NerpFormsBot(discord.Client):
                 request_prefix="DCK" if workflow == "new_docket" else "COR",
             )
             if not submission:
-                await self.store.refresh_active_submission_payload(
-                    source_key=source_key,
-                    workflow=workflow,
+                existing = await self.store.get_by_source_key(source_key)
+                if existing and await self.store.requeue_failed_uncreated_submission(
+                    submission_id=existing.id,
                     requester_username=username,
                     payload=row,
-                )
-                continue
+                ):
+                    submission = await self.store.get_by_id(existing.id)
+                    if not submission:
+                        raise RuntimeError("The failed Form response could not be reloaded for retry.")
+                else:
+                    await self.store.refresh_active_submission_payload(
+                        source_key=source_key,
+                        workflow=workflow,
+                        requester_username=username,
+                        payload=row,
+                    )
+                    continue
             try:
                 if workflow == "new_docket":
                     channel = await self._create_docket_case(submission)

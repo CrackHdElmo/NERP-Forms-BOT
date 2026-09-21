@@ -404,6 +404,37 @@ class SubmissionStore:
             row = await cursor.fetchone()
         return self._submission_from_row(row) if row else None
 
+    async def get_by_source_key(self, source_key: str) -> Submission | None:
+        """Return the durable record for one Form response row."""
+        async with aiosqlite.connect(self.path) as database:
+            database.row_factory = aiosqlite.Row
+            cursor = await database.execute(
+                "SELECT * FROM submissions WHERE source_key = ?", (source_key,)
+            )
+            row = await cursor.fetchone()
+        return self._submission_from_row(row) if row else None
+
+    async def requeue_failed_uncreated_submission(
+        self,
+        *,
+        submission_id: int,
+        requester_username: str,
+        payload: dict[str, str],
+    ) -> bool:
+        """Retry a Form response only when its prior failure created no Discord resource."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute(
+                """
+                UPDATE submissions
+                SET status = 'processing', requester_username = ?, payload_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = 'error' AND discord_channel_id IS NULL
+                """,
+                (requester_username, json.dumps(payload, sort_keys=True), submission_id),
+            )
+            await database.commit()
+        return cursor.rowcount == 1
+
     async def get_by_channel_id(self, channel_id: int) -> Submission | None:
         """Find a request from its private ticket or its linked, still-active Docket Forum post."""
         async with aiosqlite.connect(self.path) as database:

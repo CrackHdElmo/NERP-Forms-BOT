@@ -65,6 +65,35 @@ def test_docket_submission_uses_its_own_identifier_and_review_status(tmp_path) -
     assert saved.status == "pending_review"
 
 
+def test_uncreated_failed_submission_can_be_requeued_without_new_request_id(tmp_path) -> None:
+    async def exercise() -> tuple[bool, object]:
+        store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
+        await store.initialize()
+        submission = await store.begin_submission(
+            source_key="sheet:retry-1",
+            workflow="new_docket",
+            requester_username="clerk",
+            payload={"Request Type": "File New Case: Creates New Docket Entry"},
+            request_prefix="DCK",
+        )
+        assert submission is not None
+        await store.mark_failed(submission.id)
+        requeued = await store.requeue_failed_uncreated_submission(
+            submission_id=submission.id,
+            requester_username="updated-clerk",
+            payload={"Request Type": "File New Case: Creates New Docket Entry", "Select Court:": "Criminal Court"},
+        )
+        return requeued, await store.get_by_id(submission.id)
+
+    requeued, saved = asyncio.run(exercise())
+
+    assert requeued is True
+    assert saved is not None
+    assert saved.request_id == "DCK-000001"
+    assert saved.status == "processing"
+    assert saved.requester_username == "updated-clerk"
+
+
 def test_closure_is_recorded_once_and_resource_channel_is_reused(tmp_path) -> None:
     async def exercise() -> tuple[bool, bool, object, int | None]:
         store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
