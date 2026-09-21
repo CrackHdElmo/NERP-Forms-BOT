@@ -370,8 +370,8 @@ environment when old Sheet rows must not create a flood of tickets.
 | `/merge-court-order-to-docket` | Configured administrator, Judge, or Attorney General | In an active off-docket Court Order, select a Docket Forum post by link/ID, then choose whether to keep the source open or copy and close it |
 | `/claim-court-order` | Matching requester | Claims the request in its own ticket; no numeric Discord user ID required |
 | `/add-ticket-member` | Verified requester or bot administrator | Grants one server member access to the current private bot ticket |
-| `/assign-case` | Eligible staff self-assignment, or configured DOJ/PD Command and administrators | Assigns or reassigns an optional Prosecutor, Judge, or Defense Attorney for the active ticket/Docket post |
-| `/transfer-case-assignment` | Current assignee, configured DOJ/PD Command, or administrator | Offers an optional case-role handoff; the assignment remains unchanged until accepted |
+| `/assign-case` | Eligible staff self-assignment, or configured DOJ/PD Command and administrators | Assigns or reassigns a selected first/second slot for Prosecutor, Judge, Defense Attorney, or PD Officer in the active ticket/Docket post |
+| `/transfer-case-assignment` | Current assignee, configured DOJ/PD Command, or administrator | Offers a selected first/second case-role slot for handoff; the assignment remains unchanged until accepted |
 | `/accept-case-transfer` | Named eligible recipient | Accepts the selected pending handoff in the same ticket or Docket post |
 | `/generate-arrest-warrant` | Verified requester or bot administrator | Creates the one-page PNG warrant for the current claimed request |
 | `/approve-arrest-warrant` | Configured Judge or bot administrator | Electronically approves the warrant |
@@ -393,7 +393,7 @@ environment when old Sheet rows must not create a flood of tickets.
 | Form response has not appeared | Verify the correct response Sheet ID/tab name, wait 60–120 seconds, or use `/court-order-sync` as an administrator |
 | Ticket details are incomplete or stale | An authorized administrator, Judge, or Attorney General can use `/refresh-court-order` in the active ticket to reload the original Form response and repost the current details |
 | Court Order must join a prosecuted case | In the private Court Order ticket, use `/merge-court-order-to-docket` and paste the destination Docket Forum post link or ID. Select **keep open** for continued investigative work, or **close** after the copy to create a permanent staff record and remove the source ticket |
-| A prosecutor, Judge, or defense attorney changes | Use `/assign-case` for a direct Command/admin reassignment, or let the current assignee offer `/transfer-case-assignment`; the recipient must accept in the same ticket with `/accept-case-transfer` |
+| A prosecutor, Judge, defense attorney, or PD officer changes | Use `/assign-case` for a direct Command/admin reassignment of the selected Slot 1 or Slot 2, or let the current assignee offer `/transfer-case-assignment`; the recipient must accept the same slot in the ticket with `/accept-case-transfer` |
 | Requester cannot claim | The Discord username submitted on the Form must match their current server username; correct and resubmit if it does not |
 | Warrant generation fails | Check template placeholders, Google Docs API access, document sharing, three-subject/character limits, and one-page layout |
 | FiveManage URL is absent | Treat it as optional; verify the protected token and storage path while confirming the Discord PNG was still created |

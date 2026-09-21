@@ -42,6 +42,7 @@ class CaseAssignment:
 
     submission_id: int
     assignment_type: str
+    assignment_slot: int
     user_id: int
     user_name: str
     assigned_by_user_id: int
@@ -56,6 +57,7 @@ class AssignmentTransfer:
     id: int
     submission_id: int
     assignment_type: str
+    assignment_slot: int
     from_user_id: int | None
     from_user_name: str | None
     to_user_id: int
@@ -116,12 +118,13 @@ class SubmissionStore:
                 CREATE TABLE IF NOT EXISTS case_assignments (
                     submission_id INTEGER NOT NULL,
                     assignment_type TEXT NOT NULL,
+                    assignment_slot INTEGER NOT NULL,
                     user_id INTEGER NOT NULL,
                     user_name TEXT NOT NULL,
                     assigned_by_user_id INTEGER NOT NULL,
                     assigned_by_name TEXT NOT NULL,
                     assigned_at TEXT NOT NULL,
-                    PRIMARY KEY (submission_id, assignment_type)
+                    PRIMARY KEY (submission_id, assignment_type, assignment_slot)
                 )
                 """
             )
@@ -131,6 +134,7 @@ class SubmissionStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     submission_id INTEGER NOT NULL,
                     assignment_type TEXT NOT NULL,
+                    assignment_slot INTEGER NOT NULL,
                     from_user_id INTEGER,
                     from_user_name TEXT,
                     to_user_id INTEGER NOT NULL,
@@ -165,6 +169,7 @@ class SubmissionStore:
                 """
             )
             await self._add_missing_columns(database)
+            await self._migrate_case_assignment_slots(database)
             await database.commit()
 
     @staticmethod
@@ -188,6 +193,47 @@ class SubmissionStore:
         ):
             if name not in existing:
                 await database.execute(f"ALTER TABLE submissions ADD COLUMN {name} {definition}")
+
+    @staticmethod
+    async def _migrate_case_assignment_slots(database: aiosqlite.Connection) -> None:
+        """Expand the original single-holder assignment table without losing existing audit data."""
+        cursor = await database.execute("PRAGMA table_info(case_assignments)")
+        assignment_columns = {row[1] for row in await cursor.fetchall()}
+        if "assignment_slot" not in assignment_columns:
+            await database.execute("ALTER TABLE case_assignments RENAME TO case_assignments_legacy")
+            await database.execute(
+                """
+                CREATE TABLE case_assignments (
+                    submission_id INTEGER NOT NULL,
+                    assignment_type TEXT NOT NULL,
+                    assignment_slot INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    user_name TEXT NOT NULL,
+                    assigned_by_user_id INTEGER NOT NULL,
+                    assigned_by_name TEXT NOT NULL,
+                    assigned_at TEXT NOT NULL,
+                    PRIMARY KEY (submission_id, assignment_type, assignment_slot)
+                )
+                """
+            )
+            await database.execute(
+                """
+                INSERT INTO case_assignments
+                (submission_id, assignment_type, assignment_slot, user_id, user_name,
+                 assigned_by_user_id, assigned_by_name, assigned_at)
+                SELECT submission_id, assignment_type, 1, user_id, user_name,
+                       assigned_by_user_id, assigned_by_name, assigned_at
+                FROM case_assignments_legacy
+                """
+            )
+            await database.execute("DROP TABLE case_assignments_legacy")
+
+        cursor = await database.execute("PRAGMA table_info(assignment_transfers)")
+        transfer_columns = {row[1] for row in await cursor.fetchall()}
+        if "assignment_slot" not in transfer_columns:
+            await database.execute(
+                "ALTER TABLE assignment_transfers ADD COLUMN assignment_slot INTEGER NOT NULL DEFAULT 1"
+            )
 
     async def begin_submission(
         self,
@@ -490,6 +536,7 @@ class SubmissionStore:
                     WHEN 'defense_attorney' THEN 3
                     ELSE 4
                 END
+                , assignment_slot
                 """,
                 (submission_id,),
             )
@@ -501,6 +548,7 @@ class SubmissionStore:
         *,
         submission_id: int,
         assignment_type: str,
+        assignment_slot: int,
         user_id: int,
         user_name: str,
         assigned_by_user_id: int,
@@ -512,10 +560,10 @@ class SubmissionStore:
             await database.execute(
                 """
                 INSERT INTO case_assignments
-                (submission_id, assignment_type, user_id, user_name, assigned_by_user_id,
+                (submission_id, assignment_type, assignment_slot, user_id, user_name, assigned_by_user_id,
                  assigned_by_name, assigned_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(submission_id, assignment_type) DO UPDATE SET
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(submission_id, assignment_type, assignment_slot) DO UPDATE SET
                     user_id = excluded.user_id,
                     user_name = excluded.user_name,
                     assigned_by_user_id = excluded.assigned_by_user_id,
@@ -525,6 +573,7 @@ class SubmissionStore:
                 (
                     submission_id,
                     assignment_type,
+                    assignment_slot,
                     user_id,
                     user_name,
                     assigned_by_user_id,
@@ -539,6 +588,7 @@ class SubmissionStore:
         *,
         submission_id: int,
         assignment_type: str,
+        assignment_slot: int,
         from_user_id: int | None,
         from_user_name: str | None,
         to_user_id: int,
@@ -553,20 +603,21 @@ class SubmissionStore:
             await database.execute(
                 """
                 UPDATE assignment_transfers SET status = 'superseded'
-                WHERE submission_id = ? AND assignment_type = ? AND status = 'pending'
+                WHERE submission_id = ? AND assignment_type = ? AND assignment_slot = ? AND status = 'pending'
                 """,
-                (submission_id, assignment_type),
+                (submission_id, assignment_type, assignment_slot),
             )
             cursor = await database.execute(
                 """
                 INSERT INTO assignment_transfers
-                (submission_id, assignment_type, from_user_id, from_user_name, to_user_id,
+                (submission_id, assignment_type, assignment_slot, from_user_id, from_user_name, to_user_id,
                  to_user_name, proposed_by_user_id, proposed_by_name, proposed_at, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """,
                 (
                     submission_id,
                     assignment_type,
+                    assignment_slot,
                     from_user_id,
                     from_user_name,
                     to_user_id,
@@ -585,7 +636,7 @@ class SubmissionStore:
         return self._assignment_transfer_from_row(row)
 
     async def get_pending_assignment_transfer(
-        self, *, submission_id: int, assignment_type: str, recipient_user_id: int
+        self, *, submission_id: int, assignment_type: str, assignment_slot: int, recipient_user_id: int
     ) -> AssignmentTransfer | None:
         """Return the one transfer that the current user is permitted to accept."""
         async with aiosqlite.connect(self.path) as database:
@@ -593,10 +644,11 @@ class SubmissionStore:
             cursor = await database.execute(
                 """
                 SELECT * FROM assignment_transfers
-                WHERE submission_id = ? AND assignment_type = ? AND to_user_id = ? AND status = 'pending'
+                WHERE submission_id = ? AND assignment_type = ? AND assignment_slot = ?
+                      AND to_user_id = ? AND status = 'pending'
                 ORDER BY id DESC LIMIT 1
                 """,
-                (submission_id, assignment_type, recipient_user_id),
+                (submission_id, assignment_type, assignment_slot, recipient_user_id),
             )
             row = await cursor.fetchone()
         return self._assignment_transfer_from_row(row) if row else None
@@ -628,10 +680,10 @@ class SubmissionStore:
             await database.execute(
                 """
                 INSERT INTO case_assignments
-                (submission_id, assignment_type, user_id, user_name, assigned_by_user_id,
+                (submission_id, assignment_type, assignment_slot, user_id, user_name, assigned_by_user_id,
                  assigned_by_name, assigned_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(submission_id, assignment_type) DO UPDATE SET
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(submission_id, assignment_type, assignment_slot) DO UPDATE SET
                     user_id = excluded.user_id,
                     user_name = excluded.user_name,
                     assigned_by_user_id = excluded.assigned_by_user_id,
@@ -641,6 +693,7 @@ class SubmissionStore:
                 (
                     transfer.submission_id,
                     transfer.assignment_type,
+                    transfer.assignment_slot,
                     transfer.to_user_id,
                     transfer.to_user_name,
                     transfer.proposed_by_user_id,
@@ -735,6 +788,7 @@ class SubmissionStore:
         return CaseAssignment(
             submission_id=row["submission_id"],
             assignment_type=row["assignment_type"],
+            assignment_slot=row["assignment_slot"],
             user_id=row["user_id"],
             user_name=row["user_name"],
             assigned_by_user_id=row["assigned_by_user_id"],
@@ -748,6 +802,7 @@ class SubmissionStore:
             id=row["id"],
             submission_id=row["submission_id"],
             assignment_type=row["assignment_type"],
+            assignment_slot=row["assignment_slot"],
             from_user_id=row["from_user_id"],
             from_user_name=row["from_user_name"],
             to_user_id=row["to_user_id"],

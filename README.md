@@ -98,12 +98,13 @@ either keep the original Court Order open or, after forwarding its messages and 
 post the normal permanent staff record and close the original private ticket. A retained Court
 Order can be merged again later to forward only newer ticket activity to the same Docket post.
 
-`/assign-case` supports optional Prosecutor, Judge, and Defense Attorney assignments. Each
-assignment is shown as a named member or **Unassigned** in the ticket. Eligible staff may
-self-assign; configured DOJ/PD Command and bot administrators may assign or reassign another
-eligible member. `/transfer-case-assignment` creates an acceptance-required handoff, and the
-recipient must run `/accept-case-transfer` in the same ticket before the current assignment
-changes. The permanent closure record includes the final assignments and accepted transfers.
+`/assign-case` supports two separate optional record slots for each Prosecutor, Judge, Defense
+Attorney, and PD Officer. Every slot is shown as a named member or **Unassigned** in the ticket.
+Eligible staff may self-assign; configured DOJ/PD Command and bot administrators may assign or
+reassign another eligible member. `/transfer-case-assignment` creates an acceptance-required
+handoff for the selected slot, and the recipient must run `/accept-case-transfer` in the same
+ticket before that slot changes. The permanent closure record includes all final assignments and
+accepted transfers.
 
 For a claimed Arrest Warrant request, a configured administrator can use
 `/generate-arrest-warrant` with the bot-issued request ID inside that request's private ticket.

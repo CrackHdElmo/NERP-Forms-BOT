@@ -20,7 +20,8 @@ from .submission_store import Submission, SubmissionStore
 
 LOGGER = logging.getLogger(__name__)
 
-CASE_ASSIGNMENT_TYPES = ("prosecutor", "judge", "defense_attorney")
+CASE_ASSIGNMENT_TYPES = ("prosecutor", "judge", "defense_attorney", "pd_officer")
+CASE_ASSIGNMENT_SLOTS = (1, 2)
 
 
 class CourtOrderMergeError(Exception):
@@ -317,6 +318,7 @@ class NerpFormsBot(discord.Client):
             ),
             "judge": ("judges", "judges_office", "senior_judges"),
             "defense_attorney": ("defense_attorneys", "chief_of_defense"),
+            "pd_officer": ("lspd", "lspd_high_command", "lspd_chief"),
         }
         return self._role_ids(*groups.get(assignment_type, ()))
 
@@ -333,12 +335,13 @@ class NerpFormsBot(discord.Client):
             "prosecutor": "Prosecutor",
             "judge": "Judge",
             "defense_attorney": "Defense Attorney",
+            "pd_officer": "PD Officer",
         }[assignment_type]
 
     async def _case_assignment_embed(self, submission: Submission) -> discord.Embed:
         """Show all optional case roles, explicitly distinguishing an unassigned role."""
         current = {
-            assignment.assignment_type: assignment
+            (assignment.assignment_type, assignment.assignment_slot): assignment
             for assignment in await self.store.get_case_assignments(submission.id)
         }
         embed = discord.Embed(
@@ -347,10 +350,14 @@ class NerpFormsBot(discord.Client):
             color=discord.Color.blurple(),
         )
         for assignment_type in CASE_ASSIGNMENT_TYPES:
-            assignment = current.get(assignment_type)
-            value = f"<@{assignment.user_id}>" if assignment else "Unassigned"
+            value = "\n".join(
+                f"{slot}. <@{current[assignment_type, slot].user_id}>"
+                if (assignment_type, slot) in current
+                else f"{slot}. Unassigned"
+                for slot in CASE_ASSIGNMENT_SLOTS
+            )
             embed.add_field(
-                name=self._assignment_label(assignment_type), value=value, inline=True
+                name=f"{self._assignment_label(assignment_type)}s", value=value, inline=True
             )
         return embed
 
@@ -1087,11 +1094,12 @@ class NerpFormsBot(discord.Client):
 
         @self.tree.command(
             name="assign-case",
-            description="Assign or reassign the prosecutor, Judge, or defense attorney for this ticket.",
+            description="Assign or reassign one of two Prosecutor, Judge, defense, or PD officer slots.",
             guild=guild,
         )
         @app_commands.describe(
             assignment_type="The optional role being assigned.",
+            assignment_slot="The first or second record slot for that role.",
             member="The eligible server member who will hold that role.",
         )
         @app_commands.choices(
@@ -1099,11 +1107,19 @@ class NerpFormsBot(discord.Client):
                 app_commands.Choice(name="Prosecutor", value="prosecutor"),
                 app_commands.Choice(name="Judge", value="judge"),
                 app_commands.Choice(name="Defense Attorney", value="defense_attorney"),
+                app_commands.Choice(name="PD Officer", value="pd_officer"),
+            ]
+        )
+        @app_commands.choices(
+            assignment_slot=[
+                app_commands.Choice(name="Slot 1", value=1),
+                app_commands.Choice(name="Slot 2", value=2),
             ]
         )
         async def assign_case(
             interaction: discord.Interaction,
             assignment_type: app_commands.Choice[str],
+            assignment_slot: app_commands.Choice[int],
             member: discord.Member,
         ) -> None:
             if not isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
@@ -1146,6 +1162,7 @@ class NerpFormsBot(discord.Client):
             await self.store.set_case_assignment(
                 submission_id=submission.id,
                 assignment_type=assignment_type.value,
+                assignment_slot=assignment_slot.value,
                 user_id=member.id,
                 user_name=member.display_name,
                 assigned_by_user_id=interaction.user.id,
@@ -1153,7 +1170,8 @@ class NerpFormsBot(discord.Client):
                 assigned_at=assigned_at,
             )
             await interaction.channel.send(
-                f"{interaction.user.mention} assigned {member.mention} as **{self._assignment_label(assignment_type.value)}** "
+                f"{interaction.user.mention} assigned {member.mention} as **{self._assignment_label(assignment_type.value)} "
+                f"{assignment_slot.value}** "
                 f"for **{submission.request_id}**.",
                 embed=await self._case_assignment_embed(submission),
             )
@@ -1161,11 +1179,12 @@ class NerpFormsBot(discord.Client):
 
         @self.tree.command(
             name="transfer-case-assignment",
-            description="Offer your current case role to another eligible staff member for acceptance.",
+            description="Offer one of your assigned case-role slots to another eligible staff member.",
             guild=guild,
         )
         @app_commands.describe(
             assignment_type="The assigned role being handed off.",
+            assignment_slot="The first or second role slot being handed off.",
             member="The eligible staff member who must accept this transfer.",
         )
         @app_commands.choices(
@@ -1173,11 +1192,19 @@ class NerpFormsBot(discord.Client):
                 app_commands.Choice(name="Prosecutor", value="prosecutor"),
                 app_commands.Choice(name="Judge", value="judge"),
                 app_commands.Choice(name="Defense Attorney", value="defense_attorney"),
+                app_commands.Choice(name="PD Officer", value="pd_officer"),
+            ]
+        )
+        @app_commands.choices(
+            assignment_slot=[
+                app_commands.Choice(name="Slot 1", value=1),
+                app_commands.Choice(name="Slot 2", value=2),
             ]
         )
         async def transfer_case_assignment(
             interaction: discord.Interaction,
             assignment_type: app_commands.Choice[str],
+            assignment_slot: app_commands.Choice[int],
             member: discord.Member,
         ) -> None:
             if not isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
@@ -1204,11 +1231,17 @@ class NerpFormsBot(discord.Client):
                 return
             assignments = await self.store.get_case_assignments(submission.id)
             current = next(
-                (item for item in assignments if item.assignment_type == assignment_type.value), None
+                (
+                    item
+                    for item in assignments
+                    if item.assignment_type == assignment_type.value
+                    and item.assignment_slot == assignment_slot.value
+                ),
+                None,
             )
             if not current:
                 await interaction.response.send_message(
-                    f"There is no assigned {self._assignment_label(assignment_type.value)} to transfer yet.",
+                    f"There is no assigned {self._assignment_label(assignment_type.value)} {assignment_slot.value} to transfer yet.",
                     ephemeral=True,
                 )
                 return
@@ -1224,6 +1257,7 @@ class NerpFormsBot(discord.Client):
             await self.store.propose_assignment_transfer(
                 submission_id=submission.id,
                 assignment_type=assignment_type.value,
+                assignment_slot=assignment_slot.value,
                 from_user_id=current.user_id,
                 from_user_name=current.user_name,
                 to_user_id=member.id,
@@ -1233,7 +1267,8 @@ class NerpFormsBot(discord.Client):
                 proposed_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
             )
             await interaction.channel.send(
-                f"{member.mention}, {interaction.user.mention} offered you the **{self._assignment_label(assignment_type.value)}** "
+                f"{member.mention}, {interaction.user.mention} offered you the **{self._assignment_label(assignment_type.value)} "
+                f"{assignment_slot.value}** "
                 f"assignment for **{submission.request_id}**. Run `/accept-case-transfer` in this ticket to accept it.",
             )
             await interaction.followup.send(
@@ -1243,20 +1278,31 @@ class NerpFormsBot(discord.Client):
 
         @self.tree.command(
             name="accept-case-transfer",
-            description="Accept a pending prosecutor, Judge, or defense-attorney transfer in this ticket.",
+            description="Accept a pending Prosecutor, Judge, defense, or PD officer transfer in this ticket.",
             guild=guild,
         )
-        @app_commands.describe(assignment_type="The pending role transfer you are accepting.")
+        @app_commands.describe(
+            assignment_type="The pending role transfer you are accepting.",
+            assignment_slot="The first or second role slot in the pending transfer.",
+        )
         @app_commands.choices(
             assignment_type=[
                 app_commands.Choice(name="Prosecutor", value="prosecutor"),
                 app_commands.Choice(name="Judge", value="judge"),
                 app_commands.Choice(name="Defense Attorney", value="defense_attorney"),
+                app_commands.Choice(name="PD Officer", value="pd_officer"),
+            ]
+        )
+        @app_commands.choices(
+            assignment_slot=[
+                app_commands.Choice(name="Slot 1", value=1),
+                app_commands.Choice(name="Slot 2", value=2),
             ]
         )
         async def accept_case_transfer(
             interaction: discord.Interaction,
             assignment_type: app_commands.Choice[str],
+            assignment_slot: app_commands.Choice[int],
         ) -> None:
             if not isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
                 await interaction.response.send_message(
@@ -1279,6 +1325,7 @@ class NerpFormsBot(discord.Client):
             transfer = await self.store.get_pending_assignment_transfer(
                 submission_id=submission.id,
                 assignment_type=assignment_type.value,
+                assignment_slot=assignment_slot.value,
                 recipient_user_id=interaction.user.id,
             )
             if not transfer:
@@ -1298,7 +1345,8 @@ class NerpFormsBot(discord.Client):
                 )
                 return
             await interaction.channel.send(
-                f"{interaction.user.mention} accepted the **{self._assignment_label(assignment_type.value)}** "
+                f"{interaction.user.mention} accepted the **{self._assignment_label(assignment_type.value)} "
+                f"{assignment_slot.value}** "
                 f"transfer for **{submission.request_id}**.",
                 embed=await self._case_assignment_embed(submission),
             )
@@ -2577,15 +2625,19 @@ class NerpFormsBot(discord.Client):
         if subject_lines:
             embed.add_field(name="Subjects", value="\n".join(subject_lines)[:1024], inline=False)
         assignments = await self.store.get_case_assignments(submission.id)
-        assignment_values = {item.assignment_type: item for item in assignments}
+        assignment_values = {
+            (item.assignment_type, item.assignment_slot): item for item in assignments
+        }
         assignment_lines = []
         for assignment_type in CASE_ASSIGNMENT_TYPES:
-            assignment = assignment_values.get(assignment_type)
-            assignment_lines.append(
-                f"**{self._assignment_label(assignment_type)}:** "
-                f"<@{assignment.user_id}>" if assignment else
-                f"**{self._assignment_label(assignment_type)}:** Unassigned"
-            )
+            for slot in CASE_ASSIGNMENT_SLOTS:
+                assignment = assignment_values.get((assignment_type, slot))
+                assignment_lines.append(
+                    f"**{self._assignment_label(assignment_type)} {slot}:** "
+                    f"<@{assignment.user_id}>"
+                    if assignment
+                    else f"**{self._assignment_label(assignment_type)} {slot}:** Unassigned"
+                )
         embed.add_field(name="Case assignments", value="\n".join(assignment_lines), inline=False)
         transfers = await self.store.get_assignment_transfers(submission.id)
         accepted_transfers = [transfer for transfer in transfers if transfer.status == "accepted"]
@@ -2593,7 +2645,7 @@ class NerpFormsBot(discord.Client):
             embed.add_field(
                 name="Accepted assignment transfers",
                 value="\n".join(
-                    f"{self._assignment_label(transfer.assignment_type)}: "
+                    f"{self._assignment_label(transfer.assignment_type)} {transfer.assignment_slot}: "
                     f"<@{transfer.from_user_id}> → <@{transfer.to_user_id}> "
                     f"(accepted {transfer.accepted_at})"
                     for transfer in accepted_transfers

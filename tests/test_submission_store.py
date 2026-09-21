@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 
 from nerp_forms_bot.submission_store import SubmissionStore
 
@@ -256,6 +257,7 @@ def test_case_assignment_and_accepted_transfer_are_auditable(tmp_path) -> None:
         await store.set_case_assignment(
             submission_id=submission.id,
             assignment_type="prosecutor",
+            assignment_slot=1,
             user_id=10,
             user_name="Original Prosecutor",
             assigned_by_user_id=10,
@@ -265,6 +267,7 @@ def test_case_assignment_and_accepted_transfer_are_auditable(tmp_path) -> None:
         offer = await store.propose_assignment_transfer(
             submission_id=submission.id,
             assignment_type="prosecutor",
+            assignment_slot=1,
             from_user_id=10,
             from_user_name="Original Prosecutor",
             to_user_id=11,
@@ -276,6 +279,7 @@ def test_case_assignment_and_accepted_transfer_are_auditable(tmp_path) -> None:
         pending = await store.get_pending_assignment_transfer(
             submission_id=submission.id,
             assignment_type="prosecutor",
+            assignment_slot=1,
             recipient_user_id=11,
         )
         accepted = await store.accept_assignment_transfer(
@@ -289,8 +293,105 @@ def test_case_assignment_and_accepted_transfer_are_auditable(tmp_path) -> None:
     assert accepted is True
     assert pending is not None
     assert assignments[0].assignment_type == "prosecutor"
+    assert assignments[0].assignment_slot == 1
     assert assignments[0].user_id == 11
     assert assignments[0].assigned_by_user_id == 10
+
+
+def test_two_distinct_staff_members_can_hold_the_same_case_role(tmp_path) -> None:
+    async def exercise() -> object:
+        store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
+        await store.initialize()
+        submission = await store.begin_submission(
+            source_key="sheet:two-prosecutors",
+            workflow="court_order",
+            requester_username="requester",
+            payload={},
+        )
+        assert submission is not None
+        for slot, user_id in ((1, 10), (2, 11)):
+            await store.set_case_assignment(
+                submission_id=submission.id,
+                assignment_type="prosecutor",
+                assignment_slot=slot,
+                user_id=user_id,
+                user_name=f"Prosecutor {slot}",
+                assigned_by_user_id=user_id,
+                assigned_by_name=f"Prosecutor {slot}",
+                assigned_at="2026-09-21T12:00:00+00:00",
+            )
+        return await store.get_case_assignments(submission.id)
+
+    assignments = asyncio.run(exercise())
+
+    assert [(item.assignment_slot, item.user_id) for item in assignments] == [(1, 10), (2, 11)]
+
+
+def test_legacy_single_slot_assignments_migrate_to_slot_one(tmp_path) -> None:
+    database_path = tmp_path / "legacy-tracker.db"
+    with sqlite3.connect(database_path) as database:
+        database.execute(
+            """
+            CREATE TABLE case_assignments (
+                submission_id INTEGER NOT NULL,
+                assignment_type TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                user_name TEXT NOT NULL,
+                assigned_by_user_id INTEGER NOT NULL,
+                assigned_by_name TEXT NOT NULL,
+                assigned_at TEXT NOT NULL,
+                PRIMARY KEY (submission_id, assignment_type)
+            )
+            """
+        )
+        database.execute(
+            """
+            INSERT INTO case_assignments
+            (submission_id, assignment_type, user_id, user_name, assigned_by_user_id,
+             assigned_by_name, assigned_at)
+            VALUES (7, 'judge', 42, 'Judge Example', 42, 'Judge Example',
+                    '2026-09-21T12:00:00+00:00')
+            """
+        )
+        database.execute(
+            """
+            CREATE TABLE assignment_transfers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                submission_id INTEGER NOT NULL,
+                assignment_type TEXT NOT NULL,
+                from_user_id INTEGER,
+                from_user_name TEXT,
+                to_user_id INTEGER NOT NULL,
+                to_user_name TEXT NOT NULL,
+                proposed_by_user_id INTEGER NOT NULL,
+                proposed_by_name TEXT NOT NULL,
+                proposed_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                accepted_at TEXT
+            )
+            """
+        )
+        database.execute(
+            """
+            INSERT INTO assignment_transfers
+            (submission_id, assignment_type, from_user_id, from_user_name, to_user_id,
+             to_user_name, proposed_by_user_id, proposed_by_name, proposed_at, status)
+            VALUES (7, 'judge', 42, 'Judge Example', 43, 'Judge Successor',
+                    42, 'Judge Example', '2026-09-21T12:05:00+00:00', 'pending')
+            """
+        )
+
+    async def exercise() -> tuple[object, object]:
+        store = SubmissionStore(f"sqlite+aiosqlite:///{database_path}")
+        await store.initialize()
+        return await store.get_case_assignments(7), await store.get_assignment_transfers(7)
+
+    assignments, transfers = asyncio.run(exercise())
+
+    assert [(item.assignment_slot, item.assignment_type, item.user_id) for item in assignments] == [
+        (1, "judge", 42)
+    ]
+    assert [(item.assignment_slot, item.to_user_id) for item in transfers] == [(1, 43)]
 
 
 def test_court_order_docket_merge_tracks_its_destination_and_sync_checkpoint(tmp_path) -> None:
