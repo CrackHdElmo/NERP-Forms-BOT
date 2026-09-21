@@ -187,6 +187,8 @@ class GoogleWorkspaceService:
         payload: dict[str, str],
         channel_id: int,
         channel_url: str,
+        status: str = "Awaiting Claim",
+        destination: str = "Private Off-Docket ticket",
     ) -> TrackingRow:
         """Append the initial operational record to the central tracker."""
         tracker = self.ensure_tracking_sheet()
@@ -196,9 +198,8 @@ class GoogleWorkspaceService:
         docket_id = self._answer_prefix(
             payload, "Please indicate the Docket or Off-Docket Name/ID"
         ) or self._answer(payload, "Please indicate the Docket Name/ID.")
-        destination = "Private Off-Docket ticket"
         row = [
-            request_id, source_key, request_type, "Awaiting Claim", timestamp, requester_name,
+            request_id, source_key, request_type, status, timestamp, requester_name,
             "", self._answer(payload, "Discord Username", "Your Discord Name"), docket_id,
             destination, str(channel_id), channel_url, "", "", "", "", "", "", "Pending",
             "", "", "", "0", "", self._answer(payload, "Evidence Links"),

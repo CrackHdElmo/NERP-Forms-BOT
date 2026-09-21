@@ -54,8 +54,10 @@ resources are reused rather than duplicated, and their IDs are stored in the bot
 runtime workflows can use resources created through Discord without editing GitHub files.
 `/google-workspace-status` is restricted to configured bot administrators; it verifies
 the protected Google credential and creates (or finds) the test request tracker in the
-shared Drive folder. `/court-order-sync` imports new Court Order Form response rows into
-staff-only off-docket tickets. A requester then runs `/claim-court-order`; the bot verifies
+shared Drive folder. `/court-order-sync` imports new Case Management System response rows. Court
+Orders create staff-only off-docket tickets, while the **File New Case: Creates New Docket Entry**
+choice creates a `DCK-######` post directly in the configured Docket Forum with a party-based
+title and a pending-review status. A requester then runs `/claim-court-order`; the bot verifies
 their submitted Discord username through that interaction before granting ticket access.
 When an active ticket needs to be repaired after a Form or display issue, a configured
 administrator, Judge, or Attorney General can run `/refresh-court-order` in that ticket to
@@ -84,6 +86,9 @@ Form's **Docket / Off-Docket Name/ID** answer attaches the new submission to tha
 ticket rather than creating another private channel. A later authorized Judge or administrator
 may still approve the same denied request; the permanent closure record retains both the earlier
 denial and the later approval.
+
+All Court Order tickets, new Docket filing posts, and permanent case-record embeds display the
+submitted requester name, requester role, agency, primary case officer, and case-officer agency.
 The bot also checks the linked response Sheet automatically every 60 seconds by default;
 `/court-order-sync` remains available to administrators as an immediate reconciliation and
 retry command. Set `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` to a larger value (for example,

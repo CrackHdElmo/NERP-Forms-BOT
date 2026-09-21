@@ -374,7 +374,14 @@ class NerpFormsBot(discord.Client):
         member = interaction.user
         if not isinstance(member, discord.Member):
             return False
-        if self._is_administrator(interaction) or member.id == submission.claimed_user_id:
+        if (
+            self._is_administrator(interaction)
+            or member.id == submission.claimed_user_id
+            or (
+                submission.workflow == "new_docket"
+                and self._normalize_username(member.name) == submission.requester_username
+            )
+        ):
             return True
         closer_role_ids = self._role_ids(
             "judges",
@@ -2281,21 +2288,44 @@ class NerpFormsBot(discord.Client):
             if not username:
                 LOGGER.warning("Skipping Court Order response %s without a Discord username", source_key)
                 continue
+            workflow = "new_docket" if self._is_new_docket_case_row(row) else "court_order"
             submission = await self.store.begin_submission(
                 source_key=source_key,
-                workflow="court_order",
+                workflow=workflow,
                 requester_username=username,
                 payload=row,
+                request_prefix="DCK" if workflow == "new_docket" else "COR",
             )
             if not submission:
                 await self.store.refresh_active_submission_payload(
                     source_key=source_key,
-                    workflow="court_order",
+                    workflow=workflow,
                     requester_username=username,
                     payload=row,
                 )
                 continue
             try:
+                if workflow == "new_docket":
+                    channel = await self._create_docket_case(submission)
+                    tracking = await asyncio.to_thread(
+                        workspace.append_tracking_row,
+                        request_id=submission.request_id,
+                        source_key=source_key,
+                        payload=row,
+                        channel_id=channel.id,
+                        channel_url=channel.jump_url,
+                        status="Pending Review",
+                        destination="Docket Forum post",
+                    )
+                    await self.store.mark_ticket_created(
+                        submission.id,
+                        channel.id,
+                        tracking.spreadsheet_id,
+                        tracking.row_number,
+                        status="pending_review",
+                    )
+                    created += 1
+                    continue
                 reference = self._existing_docket_reference(row)
                 channel = await self._find_reusable_court_order_ticket(reference)
                 if channel:
@@ -2402,6 +2432,93 @@ class NerpFormsBot(discord.Client):
             intake.response_sheet_name,
         )
         return workspace, rows
+
+    @classmethod
+    def _is_new_docket_case_row(cls, payload: dict[str, str]) -> bool:
+        """Keep the Form's new Docket route out of the private Court Order workflow."""
+        return cls._answer(payload, "Request Type").casefold() == "file new case: creates new docket entry"
+
+    async def _create_docket_case(self, submission: Submission) -> discord.Thread:
+        """Create the staff Docket Forum post directly from a new-case Form response."""
+        guild = self.get_guild(self.environment.guild.id)
+        if not guild:
+            raise RuntimeError("The configured Discord server was not available.")
+        forum_id = self.environment.channels.get("docket_forum")
+        forum = guild.get_channel(forum_id or 0)
+        if not isinstance(forum, discord.ForumChannel):
+            raise TypeError("The configured Docket Forum is not available.")
+        thread_name = self._docket_thread_name(submission)
+        thread_with_message = await forum.create_thread(
+            name=thread_name,
+            embed=self._docket_intake_embed(submission),
+            reason=f"NERP Forms BOT new Docket filing {submission.request_id}",
+        )
+        thread = thread_with_message.thread
+        await thread.send(embed=await self._case_assignment_embed(submission))
+        await thread.send(
+            "This Docket was created from the Case Management System form. "
+            "Authorized staff may use the normal assignment and Court Order merge commands here."
+        )
+        return thread
+
+    def _docket_thread_name(self, submission: Submission) -> str:
+        """Produce a readable, stable forum-post title from the submitted case parties."""
+        petitioner = self._answer_prefix(submission.payload, "Petitioner Subject 1 Name:") or "petitioner"
+        respondent = self._answer_prefix(submission.payload, "Respondent Subject 1 Name:") or "respondent"
+        return self._discord_channel_name_component(
+            f"{submission.request_id}-{petitioner}-v-{respondent}",
+            fallback=submission.request_id.lower(),
+        )[:100]
+
+    def _docket_intake_embed(self, submission: Submission) -> discord.Embed:
+        """Render a compact, complete overview of a new Docket filing."""
+        payload = submission.payload
+        embed = discord.Embed(
+            title=f"New Docket Filing — {submission.request_id}",
+            description="Created from the Case Management System form; pending staff review.",
+            color=discord.Color.dark_gold(),
+        )
+        embed.add_field(
+            name="Filing overview",
+            value=(
+                f"**Court:** {self._answer(payload, 'Select Court:') or 'Unspecified'}\n"
+                f"**Requester:** {self._answer(payload, 'Requestors Name:') or 'Unspecified'}\n"
+                f"**Requester role:** {self._answer(payload, 'Requestors Role:') or 'Unspecified'}\n"
+                f"**Requester title:** {self._answer(payload, 'Requestors Title:') or 'Unspecified'}\n"
+                f"**Requesting agency:** {self._answer(payload, 'Requesting Agency:') or 'Unspecified'}\n"
+                f"**Primary case officer:** {self._answer_prefix(payload, 'Primary Case Officer') or 'Unspecified'}\n"
+                f"**Case officer agency:** {self._answer_prefix(payload, 'Law Enforcement Agency Assigned to Case:') or 'Unspecified'}"
+            )[:1024],
+            inline=False,
+        )
+        petitioners = [
+            value
+            for value in self._answers_for_prefix(payload, "Petitioner Subject")
+            if value.strip()
+        ]
+        respondents = [
+            value
+            for value in self._answers_for_prefix(payload, "Respondent Subject")
+            if value.strip()
+        ]
+        embed.add_field(name="Petitioner(s)", value="\n".join(petitioners) or "Unspecified", inline=True)
+        embed.add_field(name="Respondent(s)", value="\n".join(respondents) or "Unspecified", inline=True)
+        embed.add_field(
+            name="Proceeding",
+            value=(
+                f"**Trial type:** {self._answer(payload, 'Trial Type:') or 'Unspecified'}\n"
+                f"**Initial hearing:** {self._answer(payload, 'Initial Hearing Type:') or 'Unspecified'}\n"
+                f"**Proposed date:** {self._answer(payload, 'Proposed Initial Hearing Date:') or 'Unspecified'}\n"
+                f"**Proposed time:** {self._answer(payload, 'Proposed Initial Hearing Time:') or 'Unspecified'}\n"
+                f"**Party availability:** {self._answer_prefix(payload, 'Have All Parties Agreed') or 'Unspecified'}"
+            )[:1024],
+            inline=False,
+        )
+        orders = self._answers_for_prefix(payload, "Import Off-Docket Court Order")
+        if orders:
+            embed.add_field(name="Imported off-docket order reference(s)", value="\n".join(orders)[:1024], inline=False)
+        embed.set_footer(text=f"Docket ID: {submission.request_id}")
+        return embed
 
     async def _resolve_docket_thread(self, reference: str) -> discord.Thread:
         """Resolve only a Forum post in the configured Docket Forum from a pasted URL or ID."""
@@ -2621,6 +2738,7 @@ class NerpFormsBot(discord.Client):
         classified = "Classified" if classified_answer.lower() in {"yes", "y"} else "Unclassified"
         is_search_seizure = self._is_search_seizure_warrant(submission)
         is_subpoena = self._is_subpoena(submission)
+        is_new_docket = submission.workflow == "new_docket"
         subjects = self._answers_for_prefix(
             submission.payload,
             "Subject Name of Subpoena:"
@@ -2647,12 +2765,20 @@ class NerpFormsBot(discord.Client):
             else "Probable Cause For Arrest:",
         )
         evidence_links = self._answers_for_prefix(submission.payload, "Please include any evidence")
-        subject_lines = [
-            f"{number}. {self._value_at(subjects, number - 1)} "
-            f"({self._value_at(citizen_ids, number - 1)}) — "
-            f"{self._value_at(subject_detail_values, number - 1)}"
-            for number in range(1, max(len(subjects), len(citizen_ids), len(subject_detail_values)) + 1)
-        ]
+        if is_new_docket:
+            petitioners = self._answers_for_prefix(submission.payload, "Petitioner Subject")
+            respondents = self._answers_for_prefix(submission.payload, "Respondent Subject")
+            subject_lines = [
+                *(f"**Petitioner {number}:** {name}" for number, name in enumerate(petitioners, start=1)),
+                *(f"**Respondent {number}:** {name}" for number, name in enumerate(respondents, start=1)),
+            ]
+        else:
+            subject_lines = [
+                f"{number}. {self._value_at(subjects, number - 1)} "
+                f"({self._value_at(citizen_ids, number - 1)}) — "
+                f"{self._value_at(subject_detail_values, number - 1)}"
+                for number in range(1, max(len(subjects), len(citizen_ids), len(subject_detail_values)) + 1)
+            ]
         embed = discord.Embed(
             title=f"Closed {submission.workflow.replace('_', ' ').title()} — {submission.request_id}",
             description=(
@@ -2667,10 +2793,11 @@ class NerpFormsBot(discord.Client):
             value=(
                 f"**Type:** {self._answer(submission.payload, 'Request Type') or submission.workflow}\n"
                 f"**Requester:** {self._answer(submission.payload, 'Requestors Name:') or 'N/A'}\n"
+                f"**Requester role:** {self._answer(submission.payload, 'Requestors Role:') or 'Unspecified'}\n"
                 f"**Agency:** {self._answer(submission.payload, 'Requesting Agency:') or 'N/A'}\n"
                 f"**Primary Case Officer:** {self._answer_prefix(submission.payload, 'Primary Case Officer') or 'Unspecified'}\n"
                 f"**Case Officer Agency:** {self._answer_prefix(submission.payload, 'Law Enforcement Agency Assigned to Case:') or 'Unspecified'}\n"
-                f"**Docket / Off-Docket:** {self._existing_docket_reference(submission.payload) or 'N/A'}"
+                f"**Docket / Off-Docket:** {submission.request_id if is_new_docket else self._existing_docket_reference(submission.payload) or 'N/A'}"
             ),
             inline=False,
         )
@@ -2933,6 +3060,7 @@ class NerpFormsBot(discord.Client):
         )
         for label, field, show_when_empty in (
             ("Requester", "Requestors Name:", False),
+            ("Requester role", "Requestors Role:", True),
             ("Requesting agency", "Requesting Agency:", False),
             ("Primary case officer", "Primary Case Officer", True),
             ("Case officer agency", "Law Enforcement Agency Assigned to Case:", True),

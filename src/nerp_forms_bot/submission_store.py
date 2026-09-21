@@ -242,6 +242,7 @@ class SubmissionStore:
         workflow: str,
         requester_username: str,
         payload: dict[str, str],
+        request_prefix: str = "COR",
     ) -> Submission | None:
         """Create one durable source-row record, or return None for a duplicate."""
         async with aiosqlite.connect(self.path) as database:
@@ -255,7 +256,7 @@ class SubmissionStore:
             )
             if cursor.rowcount == 0:
                 return None
-            request_id = f"COR-{cursor.lastrowid:06d}"
+            request_id = f"{request_prefix.upper()}-{cursor.lastrowid:06d}"
             await database.execute(
                 "UPDATE submissions SET request_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (request_id, cursor.lastrowid),
@@ -309,16 +310,18 @@ class SubmissionStore:
         channel_id: int,
         tracker_spreadsheet_id: str | None,
         tracker_row: int | None,
+        *,
+        status: str = "awaiting_claim",
     ) -> None:
         async with aiosqlite.connect(self.path) as database:
             await database.execute(
                 """
                 UPDATE submissions
-                SET status = 'awaiting_claim', discord_channel_id = ?,
+                SET status = ?, discord_channel_id = ?,
                     tracker_spreadsheet_id = ?, tracker_row = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
-                (channel_id, tracker_spreadsheet_id, tracker_row, submission_id),
+                (status, channel_id, tracker_spreadsheet_id, tracker_row, submission_id),
             )
             await database.commit()
 

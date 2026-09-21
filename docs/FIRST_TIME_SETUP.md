@@ -5,7 +5,8 @@ working **test** deployment of NERP Forms BOT. Complete the test workflow
 before configuring a live community.
 
 The currently implemented player-facing document workflows are the **Arrest
-Warrant**, **Search or Seizure Warrant**, and **Subpoena** options within the Court Order Form.
+Warrant**, **Search or Seizure Warrant**, and **Subpoena** options within the Case Management
+System Form.
 The expanded Court Order Form may receive other request types and the bot will
 preserve them in their private tickets, but it clearly identifies that their
 dedicated document-generation and judicial commands are not configured yet. The Discord setup wizard can also
@@ -219,7 +220,7 @@ meaning of these headings intact; repeated subject sections may receive Google
 Forms suffixes such as `(2)` automatically:
 
 - Discord username / Discord name
-- Requester name and requesting agency
+- Requester name, requester role, requester title, and requesting agency
 - Request type
 - Docket / Off-Docket Name/ID
 - Subject / Arrestee name and Citizen ID
@@ -228,6 +229,20 @@ Forms suffixes such as `(2)` automatically:
 - Evidence links for each subject
 - Primary case officer and the assigned case-officer agency
 - Classification / classified designation
+
+### Configure the new Docket filing route
+
+Use the exact main **Request Type** choice **`File New Case: Creates New Docket Entry`** for a
+new Docket. Its conditional branch must collect `Select Court:`, Petitioner Subject 1 Name,
+optional Petitioner Subject 2 Name, Respondent Subject 1 Name, optional Respondent Subject 2
+Name, Trial Type, Initial Hearing Type, Proposed Initial Hearing Date and Time, party-availability
+status, and up to three `Import Off-Docket Court Order` references.
+
+The bot reads those headings from the same response Sheet, creates a `DCK-######` Forum post in
+the configured `docket_forum`, posts the filing overview and case-assignment record, and marks it
+Pending Review. It builds the post title from the Docket ID and first petitioner/respondent names,
+so a separate case-caption question is optional rather than required. The Docket Forum's parent
+permissions govern who can read and participate in the post.
 
 If you redesign the wording substantially, submit a test response and confirm
 that the bot identifies every field before using it operationally.

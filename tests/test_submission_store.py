@@ -42,6 +42,29 @@ def test_warrant_approval_is_recorded_once(tmp_path) -> None:
     assert saved.approved_document_id == "approved-document-id"
 
 
+def test_docket_submission_uses_its_own_identifier_and_review_status(tmp_path) -> None:
+    async def exercise() -> object:
+        store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
+        await store.initialize()
+        submission = await store.begin_submission(
+            source_key="sheet:case-1",
+            workflow="new_docket",
+            requester_username="clerk",
+            payload={"Request Type": "File New Case: Creates New Docket Entry"},
+            request_prefix="DCK",
+        )
+        assert submission is not None
+        await store.mark_ticket_created(submission.id, 200, None, None, status="pending_review")
+        return await store.get_by_request_id(submission.request_id)
+
+    saved = asyncio.run(exercise())
+
+    assert saved is not None
+    assert saved.request_id == "DCK-000001"
+    assert saved.workflow == "new_docket"
+    assert saved.status == "pending_review"
+
+
 def test_closure_is_recorded_once_and_resource_channel_is_reused(tmp_path) -> None:
     async def exercise() -> tuple[bool, bool, object, int | None]:
         store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
