@@ -1,8 +1,8 @@
 # First-time setup guide
 
 This guide takes a new administrator from an empty Discord application to a
-working **test** deployment of NERP - Case Management. Complete the test workflow
-before configuring a live community.
+working production deployment of NERP - Case Management. Complete the validation workflow
+before opening the bot to staff.
 
 The currently implemented player-facing document workflows are the **Arrest
 Warrant**, **Search or Seizure Warrant**, and **Subpoena** options within the Case Management
@@ -13,7 +13,7 @@ dedicated document-generation and judicial commands are not configured yet. The 
 create and register the base resources for Dockets, Attorney Requests, and
 Business Licensing, but those additional form workflows should not be
 represented as automated until their individual intake and review rules have
-been configured and tested.
+been configured and validated.
 
 For the separate day-to-day command reference for players and staff, use
 [Bot Staff and Player Reference Guide](BOT_REFERENCE_GUIDE.md). Keep both documents aligned
@@ -46,7 +46,7 @@ the new host's protected folder and update this one path in its private `config/
 
 You need administrator access to:
 
-- A Discord test server and the Discord Developer Portal.
+- A Discord server and the Discord Developer Portal.
 - A private GitHub repository containing this project.
 - A Wispbyte Python server.
 - A Google account that can create a Google Cloud project, Google Form,
@@ -62,8 +62,8 @@ Keep these boundaries in place from the beginning:
   Keep the Google service-account JSON file itself only in the protected host
   folder and never commit it to either repository.
 - Keep the GitHub repository private.
-- Use a dedicated **test Discord server**, test Google resources, and test
-  FiveManage path first.
+- Use a dedicated deployment Discord server, production Google resources, and
+  production FiveManage path.
 - Back up the Wispbyte database before recreating or deleting a server. It
   stores request state, verified requesters, closure history, and resources
   created by the Discord setup wizard.
@@ -97,7 +97,7 @@ the new revision.
 
 For local development, install Python 3.12 or newer, create a virtual
 environment, install `pip install -e .[dev]`, and copy `.env.example` to a
-local protected `.env`. Local values are for testing only; Wispbyte will use
+local protected `.env`. Local values are for local development only; Wispbyte will use
 its own protected variables.
 
 ## 2. Create and install the Discord application
@@ -111,12 +111,12 @@ its own protected variables.
    exposed, immediately reset it in the Developer Portal and replace it in
    Wispbyte.
 3. Under **OAuth2 → URL Generator**, select the `bot` and
-   `applications.commands` scopes. Install the bot into the test server using
+   `applications.commands` scopes. Install the bot into the deployment server using
    the generated URL.
 
 ### Grant the needed permissions
 
-The bot should have these permissions in the test server and in the categories
+The bot should have these permissions in the deployment server and in the categories
 it manages:
 
 - View Channels and Read Message History
@@ -133,14 +133,14 @@ roles it should never be able to affect.
 
 ### Gather non-secret Discord IDs for the configuration
 
-Enable **Developer Mode** in Discord's Advanced settings. Right-click the test
+Enable **Developer Mode** in Discord's Advanced settings. Right-click the deployment
 server and each applicable staff role, then choose **Copy ID**. These IDs are
 not secrets; they allow the bot to make exact permission decisions without
 depending on changeable display names.
 
-At minimum, the active test profile needs:
+At minimum, the active production configuration needs:
 
-- The test server ID and server name.
+- The Discord server ID and server name.
 - An `administrators` role ID list.
 - A `judges` role ID list if judicial approvals are enabled.
 - Other staff role ID lists used by your workflow (for example, prosecutors or
@@ -148,9 +148,9 @@ At minimum, the active test profile needs:
 
 ## 3. Configure the Discord environment profile
 
-The bot loads `config/environments/<environment>.yaml`, selected by
-`NERP_ENVIRONMENT`. Start with `config/environments/test.yaml` and replace its
-sample identifiers with your own test values.
+The bot loads the private deployment repository's `config/master.yaml` whenever it
+exists. Fill the included `config/master.example.yaml` once, then save it as
+`config/master.yaml` in the private repository.
 
 The profile contains non-secret resource mappings such as the server ID, staff
 role IDs, category/channel IDs, Google Form response Sheet ID, and Google Doc
@@ -163,14 +163,12 @@ by the guided Discord setup wizard in the next section. The wizard does not
 modify GitHub configuration; it records the created resource IDs in the bot's
 database and reuses matching resources rather than duplicating them.
 
-`config/environments/production.example.yaml` is a role-design reference, not
-a ready-to-run live profile. Before a live deployment, create and validate a
-complete `production.yaml` that matches the active configuration schema and
-contains approved live resource mappings.
+`config/environments/production.example.yaml` is retained only as a blank
+profile-based reference. It is not the recommended handoff path.
 
 ## 4. Create the base Discord layout with the wizard
 
-After the bot is online in the test server, run `/setup-workflow` as a server
+After the bot is online in the deployment server, run `/setup-workflow` as a server
 administrator. The command responds privately and guides you through:
 
 1. Selecting a preset.
@@ -188,7 +186,7 @@ The initial presets are:
 | Business Licensing | `Corporate Office` category and `#business-licensing` Forum |
 
 Use the Court Administration and Off-Docket Court Orders presets for the
-current Court Order test. `#service-desk` is intentionally read-only. Active
+current Court Order workflow. `#service-desk` is intentionally read-only. Active
 dockets are Forum posts in `#docket`; confidential court-order tickets are
 private text channels under Off-Docket Requests. A Forum post cannot be made
 visible to one individual only, so it is not suitable for confidential ticket
@@ -262,7 +260,7 @@ the player-facing warrant image.
 
 Connect the Form to a Google Sheets response workbook. Add the workbook ID and
 the exact response tab name (normally `Form Responses 1`) to
-`court_order_intake` in the test environment profile.
+`court_order_intake` in the private production configuration.
 
 The current parser recognizes human-readable Form question headings. Keep the
 meaning of these headings intact; repeated subject sections may receive Google
@@ -300,7 +298,7 @@ General can use `/import-court-order` inside the Docket post later and choose wh
 close the original. The same leadership roles can use `/rename-docket` in an active Docket post
 to apply a clearer case title.
 
-If you redesign the wording substantially, submit a test response and confirm
+If you redesign the wording substantially, submit a validation response and confirm
 that the bot identifies every field before using it operationally.
 
 For an existing ticket, requesters can enter the bot-issued `COR-######` ID,
@@ -413,9 +411,9 @@ confirm Wispbyte has synchronized the **private deployment repository** and
 restart the server. A GitHub push alone does not make the running bot load new
 code or configuration.
 
-## 8. First-start and end-to-end test
+## 8. First-start and end-to-end validation
 
-Run these checks in the test Discord server:
+Run these checks in the deployment Discord server:
 
 1. `/bot-status` — confirms the bot is connected to the expected guild and
    environment.
@@ -423,20 +421,20 @@ Run these checks in the test Discord server:
    Orders resources if they do not already exist.
 3. `/google-workspace-status` as a configured bot administrator — confirms the
    protected credential, Drive access, and tracker Sheet access.
-4. Submit a **new test Court Order Form** response. Wait up to the selected
+4. Submit a new Court Order Form response. Wait up to the selected
    polling interval, or use `/court-order-sync` as an administrator.
 5. Verify the bot creates a private Court Order ticket and displays one
    subject-details embed per submitted subject, including each subject's
    probable cause and evidence links.
 6. In that ticket, have the matching requester run `/claim-court-order`.
    Then verify `/add-ticket-member` can add an intended participant.
-7. Test `/generate-arrest-warrant <request-id>` from the claimed ticket. Check
+7. Run `/generate-arrest-warrant <request-id>` from the claimed ticket. Check
    that the posted PNG is one page, uses the expected data, and does not expose
    evidence links. If FiveManage is configured, verify its returned URL.
-8. As a configured Judge or administrator, test `/approve-arrest-warrant`.
+8. As a configured Judge or administrator, run `/approve-arrest-warrant`.
    Confirm that the approved PNG contains `/s/ Name`, the judge name, and the
    issue date.
-9. On a separate test ticket, use `/deny-arrest-warrant` with notes, then test
+9. On a separate request ticket, use `/deny-arrest-warrant` with notes, then run
    a later authorized approval. The final closure record must retain both
    actions.
 10. Use `/close-ticket` as the verified requester, Judge, Attorney General, or
@@ -501,11 +499,10 @@ environment when old Sheet rows must not create a flood of tickets.
 
 ## Before enabling a live server
 
-Repeat the entire checklist in an isolated test environment. Then review every
-live role, category, channel, Form, response Sheet, template, Shared Drive
-permission, Wispbyte protected variable, and backup process. Configure live
-IDs in a dedicated validated production profile; do not point a test profile at
-live Discord or Google resources.
+Complete the entire checklist after each major release. Then review every
+role, category, channel, Form, response Sheet, template, Shared Drive
+permission, Wispbyte protected variable, and backup process before making the
+new workflow available to staff.
 
 This guide is maintained alongside the bot. Whenever a new workflow, command,
 host requirement, or required permission is added, update this file and the

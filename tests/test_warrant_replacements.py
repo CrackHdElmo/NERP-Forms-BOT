@@ -9,7 +9,7 @@ from nerp_forms_bot.submission_store import Submission
 
 def _bot() -> NerpFormsBot:
     root = Path(__file__).resolve().parents[1] / "config" / "environments"
-    return NerpFormsBot(load_environment("test", root), Settings(discord_token="test-token"))
+    return NerpFormsBot(load_environment("production.example", root), Settings(discord_token="validation-token"))
 
 
 def _submission(payload: dict[str, str]) -> Submission:
@@ -279,9 +279,9 @@ def test_refresh_court_order_reloads_the_original_form_row(tmp_path: Path) -> No
     async def exercise() -> tuple[Submission, Submission | None]:
         root = Path(__file__).resolve().parents[1] / "config" / "environments"
         bot = NerpFormsBot(
-            load_environment("test", root),
+                load_environment("production.example", root),
             Settings(
-                discord_token="test-token",
+                    discord_token="validation-token",
                 google_service_account_file="service-account.json",
                 database_url=f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}",
             ),

@@ -3,24 +3,21 @@ from pathlib import Path
 from nerp_forms_bot.config import load_environment, load_master_deployment
 
 
-def test_altitude_government_profile_loads() -> None:
+def test_production_profile_template_loads() -> None:
     root = Path(__file__).resolve().parents[1] / "config" / "environments"
-    config = load_environment("test", root)
+    config = load_environment("production.example", root)
 
-    assert config.guild.id == 1414109505394053132
-    assert config.channels["docket_forum"] == 1547671517805154304
-    assert config.categories["off_docket_tickets"] == 1547691431185879180
+    assert config.guild.id == 0
+    assert config.channels["docket_forum"] is None
+    assert config.categories["off_docket_tickets"] is None
     assert config.workflows["attorney_request"].mode == "private_ticket_channel"
-    assert config.google_workspace.test_drive_folder_id == "1tSB26NtY7wX5I0yRhUfVrRXj0B3ADItb"
+    assert config.google_workspace.drive_folder_id == "REPLACE_WITH_SHARED_DRIVE_FOLDER_ID"
     assert config.court_order_intake is not None
     assert config.court_order_intake.response_sheet_name == "Form Responses 1"
     assert config.court_order_warrant is not None
-    assert config.court_order_warrant.template_document_id == "1Mp2ALt82lIVIJ_d9lr4TD0kx7U_ybWF9gBV4eZtWl2o"
+    assert config.court_order_warrant.template_document_id == "REPLACE_WITH_ARREST_WARRANT_TEMPLATE_ID"
     assert config.court_order_search_seizure_warrant is not None
-    assert (
-        config.court_order_search_seizure_warrant.template_document_id
-        == "12wCoKHco_ZVoxR5CMXXS0KbB_BUG3J7ptCBeAnNqUjo"
-    )
+    assert config.court_order_search_seizure_warrant.template_document_id == "REPLACE_WITH_SEARCH_SEIZURE_TEMPLATE_ID"
 
 
 def test_private_master_deployment_loads_runtime_and_environment_once(tmp_path) -> None:
@@ -31,10 +28,10 @@ runtime:
   discord_token: private-token
   database_url: sqlite+aiosqlite:///./data/private.db
 environment:
-  environment: private-test
+  environment: production
   guild:
     id: 42
-    name: Private Test Server
+    name: Private Deployment Server
   roles:
     administrators: [7]
 """,
@@ -45,6 +42,6 @@ environment:
 
     assert deployment is not None
     assert deployment.runtime["discord_token"] == "private-token"
-    assert deployment.environment.environment == "private-test"
+    assert deployment.environment.environment == "production"
     assert deployment.environment.guild.id == 42
     assert deployment.environment.roles["administrators"] == [7]

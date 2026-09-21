@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     discord_token: str
-    nerp_environment: str = "test"
+    nerp_environment: str = "production"
     google_service_account_file: str | None = None
     database_url: str = "sqlite+aiosqlite:///./data/nerp_forms_bot.db"
     google_forms_poll_interval_seconds: int = 60
@@ -209,7 +209,7 @@ class NerpFormsBot(discord.Client):
         return any(role.id in administrator_role_ids for role in member.roles)
 
     def _can_approve_warrant(self, interaction: discord.Interaction) -> bool:
-        """Allow the configured judicial role; administrators remain a test-safe override."""
+        """Allow the configured judicial role; administrators remain an authorized override."""
         member = interaction.user
         if not isinstance(member, discord.Member):
             return False
@@ -312,7 +312,7 @@ class NerpFormsBot(discord.Client):
         return embed
 
     def _role_ids(self, *role_groups: str) -> set[int]:
-        """Resolve configured role groups while allowing test and production aliases."""
+        """Resolve configured role groups while allowing configured role aliases."""
         return {
             role_id
             for role_group in role_groups
@@ -897,7 +897,7 @@ class NerpFormsBot(discord.Client):
         guild = discord.Object(id=self.environment.guild.id)
         # Guild commands update immediately during development.  Clearing the scoped
         # tree first also replaces any stale command schema that Discord retained
-        # from an earlier test run.
+        # from an earlier intake run.
         self.tree.clear_commands(guild=guild)
 
         @self.tree.command(
@@ -1237,7 +1237,7 @@ class NerpFormsBot(discord.Client):
 
         @self.tree.command(
             name="google-workspace-status",
-            description="Verify Google access and create the test request tracker if needed.",
+            description="Verify Google access and create the request tracker if needed.",
             guild=guild,
         )
         async def google_workspace_status(interaction: discord.Interaction) -> None:
@@ -1252,10 +1252,10 @@ class NerpFormsBot(discord.Client):
                     ephemeral=True,
                 )
                 return
-            folder_id = self.environment.google_workspace.test_drive_folder_id
+            folder_id = self.environment.google_workspace.drive_folder_id
             if not folder_id:
                 await interaction.response.send_message(
-                    "The test Drive folder ID is not configured for this environment.", ephemeral=True
+                    "The Google Drive folder ID is not configured for this environment.", ephemeral=True
                 )
                 return
 
@@ -1277,7 +1277,7 @@ class NerpFormsBot(discord.Client):
 
             action = "Created" if tracker.created else "Found"
             await interaction.followup.send(
-                f"{action} the test request tracker: {tracker.url}", ephemeral=True
+                f"{action} the request tracker: {tracker.url}", ephemeral=True
             )
 
         @self.tree.command(
@@ -1445,7 +1445,7 @@ class NerpFormsBot(discord.Client):
                     await asyncio.to_thread(
                         GoogleWorkspaceService(
                             self.settings.google_service_account_file or "",
-                            self.environment.google_workspace.test_drive_folder_id or "",
+                            self.environment.google_workspace.drive_folder_id or "",
                         ).mark_tracking_row_claimed,
                         TrackingRow(submission.tracker_spreadsheet_id, submission.tracker_row),
                         interaction.user.id,
@@ -2202,7 +2202,7 @@ class NerpFormsBot(discord.Client):
                 warrant = await asyncio.to_thread(
                     GoogleWorkspaceService(
                         self.settings.google_service_account_file,
-                        self.environment.google_workspace.test_drive_folder_id or "",
+                        self.environment.google_workspace.drive_folder_id or "",
                     ).generate_arrest_warrant,
                     template_document_id=warrant_config.template_document_id,
                     output_drive_folder_id=warrant_config.output_drive_folder_id,
@@ -2336,7 +2336,7 @@ class NerpFormsBot(discord.Client):
                 warrant = await asyncio.to_thread(
                     GoogleWorkspaceService(
                         self.settings.google_service_account_file,
-                        self.environment.google_workspace.test_drive_folder_id or "",
+                        self.environment.google_workspace.drive_folder_id or "",
                     ).generate_arrest_warrant,
                     template_document_id=warrant_config.template_document_id,
                     output_drive_folder_id=warrant_config.output_drive_folder_id,
@@ -2616,7 +2616,7 @@ class NerpFormsBot(discord.Client):
             warrant = await asyncio.to_thread(
                 GoogleWorkspaceService(
                     self.settings.google_service_account_file,
-                    self.environment.google_workspace.test_drive_folder_id or "",
+                    self.environment.google_workspace.drive_folder_id or "",
                 ).generate_arrest_warrant,
                 template_document_id=config.template_document_id,
                 output_drive_folder_id=config.output_drive_folder_id,
@@ -2706,7 +2706,7 @@ class NerpFormsBot(discord.Client):
             warrant = await asyncio.to_thread(
                 GoogleWorkspaceService(
                     self.settings.google_service_account_file,
-                    self.environment.google_workspace.test_drive_folder_id or "",
+                    self.environment.google_workspace.drive_folder_id or "",
                 ).generate_arrest_warrant,
                 template_document_id=config.template_document_id,
                 output_drive_folder_id=config.output_drive_folder_id,
@@ -3040,7 +3040,7 @@ class NerpFormsBot(discord.Client):
             raise RuntimeError("Court Order Form intake is not configured on this host.")
         workspace = GoogleWorkspaceService(
             self.settings.google_service_account_file,
-            self.environment.google_workspace.test_drive_folder_id or "",
+            self.environment.google_workspace.drive_folder_id or "",
         )
         rows = await asyncio.to_thread(
             workspace.get_form_response_rows,

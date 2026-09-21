@@ -13,7 +13,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from pypdf import PdfReader
 
-TRACKER_TITLE = "NERP - Case Management - Test Requests"
+TRACKER_TITLE = "NERP - Case Management - Requests"
 SHEET_HEADERS = [
     "Request ID",
     "Submission ID",
@@ -70,7 +70,7 @@ class GeneratedWarrant:
 
 
 class GoogleWorkspaceService:
-    """Create or locate the one test tracking Sheet in the shared Drive folder."""
+    """Create or locate the request tracking Sheet in the configured Drive folder."""
 
     def __init__(self, service_account_file: str, drive_folder_id: str) -> None:
         self.service_account_file = Path(service_account_file)

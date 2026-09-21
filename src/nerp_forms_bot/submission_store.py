@@ -204,7 +204,7 @@ class SubmissionStore:
 
     @staticmethod
     async def _add_missing_columns(database: aiosqlite.Connection) -> None:
-        """Apply additive migrations without disrupting existing test submissions."""
+        """Apply additive migrations without disrupting existing stored submissions."""
         cursor = await database.execute("PRAGMA table_info(submissions)")
         existing = {row[1] for row in await cursor.fetchall()}
         for name, definition in (

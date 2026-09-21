@@ -29,11 +29,11 @@ class GoogleWorkspaceConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    test_drive_folder_id: str | None = None
+    drive_folder_id: str | None = None
 
 
 class CourtOrderIntakeConfig(BaseModel):
-    """The non-secret Google Form response source for the first test workflow."""
+    """The non-secret Google Form response source for the Case Management workflow."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -83,7 +83,6 @@ class EnvironmentConfig(BaseModel):
     court_order_warrant: CourtOrderWarrantConfig | None = None
     court_order_search_seizure_warrant: CourtOrderSearchSeizureWarrantConfig | None = None
     court_order_subpoena: CourtOrderSubpoenaConfig | None = None
-    test_requester_user_id: int | None = None
 
 
 class MasterDeploymentConfig(BaseModel):

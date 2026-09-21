@@ -8,7 +8,7 @@ work items, maintains Google Sheets/Drive records, and supports role-verified DO
 
 For a complete from-zero walkthrough covering private GitHub source control, Discord bot
 creation and permissions, Google Cloud/service-account and Shared Drive setup, Wispbyte
-deployment, the guided Discord resource wizard, and an end-to-end Court Order test, follow
+deployment, the guided Discord resource wizard, and an end-to-end Court Order validation, follow
 [the first-time setup guide](docs/FIRST_TIME_SETUP.md). Keep that guide updated whenever the
 bot gains a workflow, command, permission, or hosting requirement.
 
@@ -17,6 +17,10 @@ It is the package copy of the service-desk-ready command reference for players a
 
 For a single administrator starting point that maps every safe YAML setting, protected host
 variable, and Discord-managed option, see [CONFIGURATION.md](CONFIGURATION.md).
+
+For a portable, recipient-owned Google Drive package — including templates, the Form, its
+response Sheet, the output folder, and the exact values to place in the private master
+configuration — see [the Google Workspace handoff guide](docs/GOOGLE_WORKSPACE_HANDOFF.md).
 
 For the private deployment repository, copy `config/master.example.yaml` to
 `config/master.yaml`. That one private source-controlled file can hold the bot token, optional
@@ -43,12 +47,12 @@ path when deploying to a Linux or Windows VPS. The full migration-safe explanati
 The bot must never use a Discord text channel as the destination for an active docket.
 Each docket is a post in the configured `docket` Forum Channel.
 
-## Environments
+## Deployment configuration
 
-- `config/environments/test.yaml` is the Altitude Government test profile. It contains
-  Discord resource identifiers, which are not secrets.
-- `config/environments/production.example.yaml` documents the live NERP DOJ role design.
-  It intentionally has no live server/category/channel IDs yet.
+- `config/master.yaml` in the private deployment repository is the authoritative
+  production configuration. It contains the deployment's runtime settings and resource IDs.
+- `config/environments/production.example.yaml` is a blank legacy/profile reference. It has
+  no server-specific identifiers.
 - `.env` contains local or host-provided secrets and is ignored by Git. Start from
   `.env.example`; never send or commit its populated values.
 
@@ -81,7 +85,7 @@ links; privately preview the directory; and adopt a prior bot-authored Service D
 future in-place updates. Every change edits the same managed post rather than creating duplicate
 directory messages.
 `/google-workspace-status` is restricted to configured bot administrators; it verifies
-the protected Google credential and creates (or finds) the test request tracker in the
+the protected Google credential and creates (or finds) the request tracker in the
 shared Drive folder. `/court-order-sync` imports new Case Management System response rows. Court
 Orders create staff-only off-docket tickets, while the **File New Case: Creates New Docket Entry**
 choice creates a `DCK-######` post directly in the configured Docket Forum with a party-based

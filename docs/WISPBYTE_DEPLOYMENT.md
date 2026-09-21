@@ -1,8 +1,8 @@
 # Wispbyte deployment: NERP - Case Management
 
-Use this guide for a **test bot** first. Do not deploy to a live server until the
-complete test workflow has passed. For the full Discord, Google, GitHub, and test
-workflow walkthrough, start with the [first-time setup guide](FIRST_TIME_SETUP.md).
+Use this guide for the production deployment. Complete the validation checklist
+before opening the bot to staff. For the full Discord, Google, GitHub, and
+deployment walkthrough, start with the [first-time setup guide](FIRST_TIME_SETUP.md).
 
 ## 1. Prepare the Wispbyte server
 
@@ -34,17 +34,17 @@ python main.py
 
 Create these in Wispbyte's Startup / Environment Variables settings:
 
-| Name | Value for first test deployment |
+| Name | Production value |
 | --- | --- |
 | `DISCORD_TOKEN` | The bot token, entered directly in Wispbyte—not in chat or source files |
-| `NERP_ENVIRONMENT` | `test` |
+| `NERP_ENVIRONMENT` | `production` |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./data/nerp_forms_bot.db` |
 | `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` | `60` |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | `/home/container/secrets/google-service-account.json` |
 
 Upload the service-account JSON file directly to Wispbyte's ignored `secrets/` folder.
 Do not commit it to GitHub, upload it through source control, or paste its contents into
-chat. The test Drive folder ID belongs in `config/environments/test.yaml`; it is an
+chat. The configured Drive folder ID belongs in `config/master.yaml`; it is an
 identifier, not a credential.
 
 ## 4. First startup check
@@ -57,9 +57,9 @@ the bot connected, with its Discord account name and ID. In Altitude Government,
 ```
 
 The bot must reply privately that it is connected to **Altitude Government** using the
-**test** configuration profile.
+**production** configuration profile.
 
-After the Google credential file and test Drive folder are configured, a test-role
+After the Google credential file and Drive folder are configured, an authorized
 administrator can run `/google-workspace-status`. The command creates or finds the
 single request tracker and returns its Google Sheets link.
 
@@ -74,8 +74,8 @@ new source solely because it was pushed to GitHub.
 - **Invalid token:** regenerate the token in the Discord Developer Portal, replace it
   only in Wispbyte's protected variable, and restart. Never paste it into chat.
 - **Bot starts but `/bot-status` is absent:** wait briefly for Discord to register the
-  test-server command, then restart once. Confirm the bot is installed in Altitude
-  Government and `NERP_ENVIRONMENT=test` is present.
+  server command, then restart once. Confirm the bot is installed in the configured
+  Discord server and `NERP_ENVIRONMENT=production` is present.
 - **Permission error in a channel:** verify the bot's per-category/channel permissions;
   it should not need Administrator. The guided setup and ticket workflows require
   **Manage Channels**, **Manage Roles**, and **Manage Threads**. Keep the bot role above

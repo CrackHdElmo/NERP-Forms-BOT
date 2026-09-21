@@ -69,7 +69,7 @@ environment:
       initial_status: pending_review
 
   google_workspace:
-    test_drive_folder_id: REPLACE_WITH_SHARED_DRIVE_FOLDER_ID
+    drive_folder_id: REPLACE_WITH_SHARED_DRIVE_FOLDER_ID
 
   court_order_intake:
     form_url: REPLACE_WITH_CASE_MANAGEMENT_FORM_URL

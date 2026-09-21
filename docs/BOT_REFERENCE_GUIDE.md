@@ -149,7 +149,7 @@ information, case notes, credentials, or private staff-only URLs in the public S
 | --- | --- | --- |
 | `/bot-status` | Server members | Confirms that the bot is connected to the intended Discord server and environment. |
 | `/setup-workflow` | Configured bot administrator | Guided setup for categories, channels, and Forums. It previews the planned resources before creating or registering them. |
-| `/google-workspace-status` | Configured bot administrator | Confirms protected Google access and creates/fetches the test tracker when needed. |
+| `/google-workspace-status` | Configured bot administrator | Confirms protected Google access and creates/fetches the request tracker when needed. |
 | `/court-order-sync` | Configured bot administrator | Immediately imports unprocessed Case Management System responses. Normal polling runs automatically. |
 | `/court-order-baseline` | Configured bot administrator | Marks existing Form responses as historical during initial setup so only later submissions become tickets. Use carefully. |
 | `/bot-admin add` | Server owner or existing bot administrator | Gives a selected server member a durable, direct NERP bot-administrator grant. |

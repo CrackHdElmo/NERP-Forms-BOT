@@ -24,7 +24,7 @@ The active profile is selected by `NERP_ENVIRONMENT` in the protected runtime se
 config/environments/<NERP_ENVIRONMENT>.yaml
 ```
 
-Use `config/environments/test.yaml` as the working reference for the complete supported shape only when the private master configuration is not present. For a profile-based deployment, copy `config/environments/production.example.yaml` to `config/environments/production.yaml`, replace every `null` or sample value with the live resource ID, then set `NERP_ENVIRONMENT=production` in Wispbyte.
+Use `config/environments/production.example.yaml` as the complete supported shape only when the private master configuration is not present. For a profile-based deployment, copy it to `config/environments/production.yaml`, replace every `null` or sample value with the live resource ID, then set `NERP_ENVIRONMENT=production` in Wispbyte.
 
 Do not commit `production.yaml` if it contains IDs or deployment details your organization treats as private. Git ignores ordinary `.env` secrets, but review every new file before pushing.
 
@@ -34,7 +34,7 @@ This is the main non-secret configuration file for the legacy/profile-based meth
 
 | YAML section | Configure here |
 | --- | --- |
-| `environment` | Profile label shown by `/bot-status`, such as `test` or `production`. |
+| `environment` | Profile label shown by `/bot-status`; use `production` for a deployed bot. |
 | `guild` | Discord server ID and display name. |
 | `channels` | Existing Service Desk, Docket Forum, and Business Licensing Forum IDs. |
 | `categories` | Court Administration, Off-Docket, Attorney Requests, and Corporate Office category IDs. |
@@ -45,7 +45,6 @@ This is the main non-secret configuration file for the legacy/profile-based meth
 | `court_order_warrant` | Arrest Warrant Google Doc template ID and generated-file destination folder ID. |
 | `court_order_search_seizure_warrant` | Search / Seizure template and output-folder IDs. |
 | `court_order_subpoena` | Subpoena template and output-folder IDs. |
-| `test_requester_user_id` | Optional test-only starter user ID. Omit it from a live profile unless it is deliberately needed. |
 
 ### Minimum role mapping
 
@@ -72,7 +71,7 @@ For the legacy/profile-based method, start from [`.env.example`](.env.example). 
 | Setting | Required | Purpose |
 | --- | --- | --- |
 | `DISCORD_TOKEN` | Yes | Discord application bot token. |
-| `NERP_ENVIRONMENT` | Yes | Profile name, normally `test` or `production`. |
+| `NERP_ENVIRONMENT` | Yes | Profile name, normally `production`. |
 | `DATABASE_URL` | Yes | Durable bot state: tickets, assignments, Service Desk configuration, and direct bot-admin grants. Back it up before major changes. |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | For Form/Drive workflows | Secure path to the Google service-account JSON file on the host. |
 | `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` | No | Form polling interval; `60` is the default. |
@@ -116,8 +115,8 @@ Direct `/bot-admin` grants supplement — but do not replace — server ownershi
 ## Safe change process
 
 1. Back up the runtime database before a major configuration or role change.
-2. Update the test profile first and validate `/bot-status`, `/google-workspace-status`, and the affected workflow.
-3. Make the matching live change in `production.yaml` and protected Wispbyte variables.
+2. Update the private `config/master.yaml`, then validate `/bot-status`, `/google-workspace-status`, and the affected workflow.
+3. Make the matching protected Wispbyte runtime change when one is needed.
 4. Push the reviewed project change to GitHub, let Wispbyte synchronize the selected branch, then restart the bot once.
 5. Confirm the bot is online and that the updated slash command or workflow behaves correctly in the target server.
 
@@ -132,5 +131,6 @@ changes, update these together before publishing the tested change:
 3. `docs/FIRST_TIME_SETUP.md` — from-zero installation and deployment procedure.
 4. `docs/BOT_REFERENCE_GUIDE.md` — staff/player commands and daily workflow guide.
 5. `config/master.example.yaml` — safe, current one-file private-deployment template.
+6. `docs/GOOGLE_WORKSPACE_HANDOFF.md` — recipient-owned Google assets and migration steps.
 
 For the full first deployment walkthrough, see [docs/FIRST_TIME_SETUP.md](docs/FIRST_TIME_SETUP.md). For a player and staff command guide, see [docs/BOT_REFERENCE_GUIDE.md](docs/BOT_REFERENCE_GUIDE.md).

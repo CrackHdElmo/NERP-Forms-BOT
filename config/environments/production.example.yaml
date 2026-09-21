@@ -1,9 +1,10 @@
-# NERP DOJ production template. Do not add Discord or Google secrets here.
-# Populate guild/category/channel IDs only after the live server structure is approved.
+# Optional profile-based production configuration template.
+# Prefer config/master.yaml in the private deployment repository for a one-file deployment.
+# This file contains placeholders only and may safely remain in the public source repository.
 environment: production
 guild:
-  id: null
-  name: New Era RP DOJ
+  id: 0
+  name: REPLACE_WITH_DISCORD_SERVER_NAME
 
 channels:
   service_desk: null
@@ -17,24 +18,53 @@ categories:
   corporate_office: null
 
 roles:
-  # Populate these direct authorization lists before starting a live profile.
   administrators: []
   judges: []
+  attorney_general: []
+  prosecutors: []
+  defense_attorneys: []
   pd_officers: []
   doj_command: []
   pd_command: []
-  district_attorneys_office: [1547647738022465596]
-  defense_attorneys: [1185753861403717693]
-  chief_of_defense: [1284705608574177280]
-  assistant_district_attorneys: [1479658687537614848]
-  prosecutors: [1177483804949098528]
-  lspd: [1177701402315862102]
-  lspd_high_command: [1180669630646321183]
-  lspd_chief: [1177490980652458045]
-  judges_office: [1518072238656454839]
-  senior_judges: [1479656354007224613]
-  high_command_doj: [1180669763106639872]
-  paralegals: [1501306329774686249]
-  attorney_general: [1347743186612916294]
-  business_owners: [1182075802809012316]
-  registered_jurors: [1479660603172716659]
+
+google_workspace:
+  drive_folder_id: REPLACE_WITH_SHARED_DRIVE_FOLDER_ID
+
+court_order_intake:
+  form_url: REPLACE_WITH_CASE_MANAGEMENT_FORM_URL
+  response_spreadsheet_id: REPLACE_WITH_RESPONSE_SPREADSHEET_ID
+  response_sheet_name: Form Responses 1
+
+court_order_warrant:
+  template_document_id: REPLACE_WITH_ARREST_WARRANT_TEMPLATE_ID
+  output_drive_folder_id: REPLACE_WITH_OUTPUT_FOLDER_ID
+
+court_order_search_seizure_warrant:
+  template_document_id: REPLACE_WITH_SEARCH_SEIZURE_TEMPLATE_ID
+  output_drive_folder_id: REPLACE_WITH_OUTPUT_FOLDER_ID
+
+court_order_subpoena:
+  template_document_id: REPLACE_WITH_SUBPOENA_TEMPLATE_ID
+  output_drive_folder_id: REPLACE_WITH_OUTPUT_FOLDER_ID
+
+workflows:
+  new_docket:
+    destination: docket_forum
+    mode: forum_post
+    initial_status: pending_review
+  existing_docket_filing:
+    destination: docket_forum
+    mode: existing_forum_post
+    initial_status: pending_review
+  off_docket_request:
+    destination: off_docket_tickets
+    mode: private_ticket_channel
+    initial_status: pending_review
+  attorney_request:
+    destination: attorney_request_tickets
+    mode: private_ticket_channel
+    initial_status: unassigned
+  business_license:
+    destination: business_licensing_forum
+    mode: forum_post
+    initial_status: pending_review
