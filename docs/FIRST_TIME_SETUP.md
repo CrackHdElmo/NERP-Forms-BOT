@@ -22,6 +22,26 @@ whenever a command, role boundary, or workflow changes.
 For the administrator-facing map of every editable environment value, protected host setting,
 and Discord-managed option, use the root [configuration map](../CONFIGURATION.md).
 
+### Google service-account credential file
+
+The Google service-account credential is a downloaded JSON **file**, not a value to paste into
+Discord, GitHub, a Form, or the master configuration. Place that file in a host-only protected
+folder, then enter only its absolute path in `runtime.google_service_account_file` inside the
+private deployment repository's `config/master.yaml`.
+
+Use the path format for the host that runs the bot:
+
+| Host | Example path |
+| --- | --- |
+| Wispbyte | `/home/container/secrets/google-service-account.json` |
+| Linux VPS/dedicated server | `/opt/nerp/secrets/google-service-account.json` |
+| Windows VPS/dedicated server | `C:/NERP/secrets/google-service-account.json` |
+
+Create the `secrets` folder only on that host and restrict access to the operating-system account
+that runs the bot. The private master configuration may reference the file path, but the JSON
+file itself must never be committed to GitHub. If you migrate the bot, securely copy the JSON to
+the new host's protected folder and update this one path in its private `config/master.yaml`.
+
 ## Before you begin
 
 You need administrator access to:
@@ -36,9 +56,11 @@ You need administrator access to:
 Keep these boundaries in place from the beginning:
 
 - Treat the Discord bot token, Google service-account JSON key, and FiveManage
-  token as secrets. Put them only in Wispbyte protected settings or protected
-  server files. Never paste them into Discord, chat, GitHub, screenshots, or a
-  populated `.env` file.
+  token as secrets. The private deployment repository may store the Discord and
+  FiveManage tokens in its tracked `config/master.yaml`; never put them in the
+  public source repository, Discord, chat, screenshots, or a public `.env`.
+  Keep the Google service-account JSON file itself only in the protected host
+  folder and never commit it to either repository.
 - Keep the GitHub repository private.
 - Use a dedicated **test Discord server**, test Google resources, and test
   FiveManage path first.
@@ -351,7 +373,7 @@ bot maps each subject's `Purpose of Subpoena:` response into that subject's
 `SUBPOENA_TYPE` field. Evidence remains in the private Discord ticket and its
 staff closure record rather than appearing on the player-facing PNG.
 
-## 7. Connect Wispbyte to GitHub and add protected values
+## 7. Connect Wispbyte to the private deployment repository
 
 1. Create a Wispbyte server with Python 3.12 or later. The Discord bot uses an
    outbound Gateway connection and does not need an inbound web port.
@@ -365,28 +387,31 @@ staff closure record rather than appearing on the player-facing PNG.
    python main.py
    ```
 
-5. Create the protected environment variables below in Wispbyte. Values belong
-   in Wispbyte only, never in the repository.
-
-| Variable | First test value / purpose |
-| --- | --- |
-| `DISCORD_TOKEN` | Discord token for this bot application |
-| `NERP_ENVIRONMENT` | `test` |
-| `DATABASE_URL` | `sqlite+aiosqlite:///./data/nerp_forms_bot.db` for the test server |
-| `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` | `60` (or `120` for a slower interval) |
-| `GOOGLE_SERVICE_ACCOUNT_FILE` | `/home/container/secrets/google-service-account.json` |
-| `FIVEMANAGE_API_TOKEN` | Optional protected FiveManage API token |
-| `FIVEMANAGE_STORAGE_PATH` | Optional CDN folder, for example `nerp-doj/court-orders` |
-
+5. In the **private deployment repository only**, copy
+   `config/master.example.yaml` to `config/master.yaml` and fill its `runtime:`
+   and `environment:` sections. That is the one source-controlled deployment
+   file for the Discord token, optional FiveManage token, database location,
+   Discord IDs, role IDs, Forms, Sheets, Drive folders, template IDs, and
+   workflow settings. Do not put that populated file in the public repository.
 6. Upload the Google service-account JSON directly to the protected Wispbyte
-   path named by `GOOGLE_SERVICE_ACCOUNT_FILE`. Do not use GitHub to upload it.
+   host folder, normally `/home/container/secrets/`. In the private
+   `config/master.yaml`, set:
+
+   ```yaml
+   runtime:
+     google_service_account_file: /home/container/secrets/google-service-account.json
+   ```
+
+   This value is the absolute host path to the JSON file; it is not the JSON
+   contents. Do not use GitHub to upload or store the credential file itself.
 7. Start or restart the server. Preserve the `data/` directory or use an
    approved persistent database location so request and setup state survive
    normal restarts.
 
-Whenever you push a code or configuration change to GitHub, confirm Wispbyte
-has synchronized it and restart the server. A GitHub push alone does not make
-the running bot load new code.
+Whenever you push a code or private `config/master.yaml` change to GitHub,
+confirm Wispbyte has synchronized the **private deployment repository** and
+restart the server. A GitHub push alone does not make the running bot load new
+code or configuration.
 
 ## 8. First-start and end-to-end test
 

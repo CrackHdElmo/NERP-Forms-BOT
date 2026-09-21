@@ -21,6 +21,14 @@ Docket Forum post, where authorized participants can work the request.
 Never share API tokens, service-account files, private evidence, or sensitive case information
 in public channels.
 
+### Google credential safety
+
+The bot administrator's private `config/master.yaml` contains the **path** to the Google
+service-account JSON file, not the JSON credential itself. On Wispbyte that path is normally
+`/home/container/secrets/google-service-account.json`; a VPS or dedicated-server deployment must
+change it to that host's protected absolute path. See [CONFIGURATION.md](../CONFIGURATION.md) for
+the exact Wispbyte, Linux, and Windows examples. Players and staff never need this file.
+
 ## Player and requester workflow
 
 1. Open `#service-desk` and select the correct form.

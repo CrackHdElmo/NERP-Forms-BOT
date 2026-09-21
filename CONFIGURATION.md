@@ -79,6 +79,28 @@ For the legacy/profile-based method, start from [`.env.example`](.env.example). 
 | `FIVEMANAGE_API_TOKEN` | No | Optional FiveManage upload token. |
 | `FIVEMANAGE_STORAGE_PATH` | No | Optional FiveManage folder/path for generated media. |
 
+### Google service-account file path
+
+`google_service_account_file` is **not** the Google API key, a token, the Google account email,
+or the contents of the downloaded JSON. It is only the absolute file path on the host where the
+Google service-account JSON credential is securely stored. The JSON file gives the bot access to
+the Google Form response Sheet, Google Docs templates, and Shared Drive resources that were
+shared with the service account.
+
+Keep the JSON file outside the repository and outside the `data/` directory. Create a host-only
+`secrets` folder, limit it to the account that runs the bot, and point the master configuration at
+that file:
+
+| Host | Example `google_service_account_file` value |
+| --- | --- |
+| Current Wispbyte server | `/home/container/secrets/google-service-account.json` |
+| Linux VPS or dedicated server | `/opt/nerp/secrets/google-service-account.json` |
+| Windows VPS or dedicated server | `C:/NERP/secrets/google-service-account.json` |
+
+When migrating hosts, copy the existing JSON securely to the new host's protected `secrets`
+folder and change only this path in the new host's private `config/master.yaml`. Do not commit the
+JSON file, expose it in a screenshot, or paste it into a support request.
+
 ## Items administrators can change without editing YAML
 
 These values are stored in the bot database and survive restarts. They are managed through Discord commands, so they should not be added to the YAML profile.
@@ -98,5 +120,17 @@ Direct `/bot-admin` grants supplement — but do not replace — server ownershi
 3. Make the matching live change in `production.yaml` and protected Wispbyte variables.
 4. Push the reviewed project change to GitHub, let Wispbyte synchronize the selected branch, then restart the bot once.
 5. Confirm the bot is online and that the updated slash command or workflow behaves correctly in the target server.
+
+## Documentation maintenance rule
+
+The project treats documentation as part of every bot feature. Whenever a command, workflow,
+permission boundary, setting, host requirement, template requirement, or deployment procedure
+changes, update these together before publishing the tested change:
+
+1. `README.md` — project overview and deployment summary.
+2. `CONFIGURATION.md` — authoritative configuration and host-migration reference.
+3. `docs/FIRST_TIME_SETUP.md` — from-zero installation and deployment procedure.
+4. `docs/BOT_REFERENCE_GUIDE.md` — staff/player commands and daily workflow guide.
+5. `config/master.example.yaml` — safe, current one-file private-deployment template.
 
 For the full first deployment walkthrough, see [docs/FIRST_TIME_SETUP.md](docs/FIRST_TIME_SETUP.md). For a player and staff command guide, see [docs/BOT_REFERENCE_GUIDE.md](docs/BOT_REFERENCE_GUIDE.md).

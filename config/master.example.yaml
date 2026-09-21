@@ -2,13 +2,19 @@
 #
 # Copy this file to config/master.yaml ONLY in the private deployment repository.
 # That file is intentionally ignored by the public source repository. It is the one
-# configuration file loaded by the bot whenever it exists. Do not commit Google
-# service-account JSON itself; set GOOGLE_SERVICE_ACCOUNT_FILE to its Wispbyte path.
+# configuration file loaded by the bot whenever it exists. Do not commit the Google
+# service-account JSON itself; set only its secure absolute host-file path below.
+#
+# Wispbyte example: /home/container/secrets/google-service-account.json
+# Linux VPS/dedicated-server example: /opt/nerp/secrets/google-service-account.json
+# Windows VPS/dedicated-server example: C:/NERP/secrets/google-service-account.json
+# Create and secure that folder on the host, place the JSON there with restricted access,
+# and never commit, screenshot, or paste the JSON credential contents.
 
 runtime:
   discord_token: REPLACE_WITH_DISCORD_BOT_TOKEN
   database_url: sqlite+aiosqlite:///./data/nerp_forms_bot.db
-  google_service_account_file: /secure/path/to/google-service-account.json
+  google_service_account_file: /secure/path/to/google-service-account.json # Replace with the host-specific absolute path above.
   google_forms_poll_interval_seconds: 60
   fivemanage_api_token: REPLACE_WITH_OPTIONAL_FIVEMANAGE_TOKEN
   fivemanage_storage_path: nerp-doj/court-orders

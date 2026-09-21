@@ -24,6 +24,12 @@ FiveManage token, runtime settings, Discord resource and role IDs, and all Googl
 The Google service-account JSON file itself remains outside Git and is referenced only by its
 secured Wispbyte path. The public repository must retain only the blank example file.
 
+`runtime.google_service_account_file` is the absolute **host path** to that protected JSON file,
+not the credential contents. For the current Wispbyte host use
+`/home/container/secrets/google-service-account.json`; use an appropriate protected absolute
+path when deploying to a Linux or Windows VPS. The full migration-safe explanation is in
+[CONFIGURATION.md](CONFIGURATION.md).
+
 ## Initial Discord design
 
 | Workflow | Discord destination | Visibility model |
