@@ -15,7 +15,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .config import EnvironmentConfig, load_environment
 from .fivemanage import FiveManageService
-from .google_workspace import GoogleWorkspaceService, TrackingRow
+from .google_workspace import GeneratedWarrant, GoogleWorkspaceService, TrackingRow
 from .submission_store import Submission, SubmissionStore
 
 LOGGER = logging.getLogger(__name__)
@@ -1335,8 +1335,346 @@ class NerpFormsBot(discord.Client):
                 ephemeral=True,
             )
 
+        @self.tree.command(
+            name="generate-search-seizure-warrant",
+            description="Create a one-page Search / Seizure Warrant from a claimed Court Order request.",
+            guild=guild,
+        )
+        @app_commands.describe(request_id="Court Order request ID, for example COR-000001.")
+        async def generate_search_seizure_warrant(
+            interaction: discord.Interaction, request_id: str
+        ) -> None:
+            await self._generate_search_seizure_warrant(interaction, request_id)
+
+        @self.tree.command(
+            name="approve-search-seizure-warrant",
+            description="Judicially approve the Search / Seizure Warrant in this private ticket.",
+            guild=guild,
+        )
+        async def approve_search_seizure_warrant(interaction: discord.Interaction) -> None:
+            await self._approve_search_seizure_warrant(interaction)
+
+        @self.tree.command(
+            name="deny-search-seizure-warrant",
+            description="Judicially deny this Search / Seizure Warrant and record the required reason.",
+            guild=guild,
+        )
+        @app_commands.describe(denial_notes="Required reason or corrective guidance for the denial.")
+        async def deny_search_seizure_warrant(
+            interaction: discord.Interaction, denial_notes: str
+        ) -> None:
+            await self._deny_search_seizure_warrant(interaction, denial_notes)
+
         await self.tree.sync(guild=guild)
         self._court_order_poll_task = asyncio.create_task(self._court_order_poll_loop())
+
+    async def _generate_search_seizure_warrant(
+        self, interaction: discord.Interaction, request_id: str
+    ) -> None:
+        config = self.environment.court_order_search_seizure_warrant
+        if not config or not self.settings.google_service_account_file:
+            await interaction.response.send_message(
+                "The Search / Seizure Warrant template is not configured on this host yet.",
+                ephemeral=True,
+            )
+            return
+        submission = await self.store.get_by_request_id(request_id)
+        if not submission or submission.workflow != "court_order":
+            await interaction.response.send_message(
+                "That Court Order request could not be found.", ephemeral=True
+            )
+            return
+        if not self._is_search_seizure_warrant(submission):
+            await interaction.response.send_message(
+                "This request is not a Search / Seizure Warrant. Its selected Court Order type is "
+                f"**{self._request_type(submission) or 'not recognized'}**.",
+                ephemeral=True,
+            )
+            return
+        if interaction.channel_id != submission.discord_channel_id:
+            await interaction.response.send_message(
+                "Run this command inside the private ticket for that Court Order request.",
+                ephemeral=True,
+            )
+            return
+        if not submission.claimed_user_id:
+            await interaction.response.send_message(
+                "The requester must first verify ownership with `/claim-court-order`.",
+                ephemeral=True,
+            )
+            return
+        if not (self._is_administrator(interaction) or interaction.user.id == submission.claimed_user_id):
+            await interaction.response.send_message(
+                "Only the verified requester or a configured bot administrator can generate this warrant.",
+                ephemeral=True,
+            )
+            return
+        channel = self.get_channel(submission.discord_channel_id or 0)
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message(
+                "The private request ticket could not be located.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        replacements, validation_error = self._search_seizure_warrant_replacements(submission=submission)
+        if validation_error:
+            await self._notify_warrant_fit_failure(channel, submission, validation_error)
+            await interaction.followup.send(
+                "No warrant was issued. The requester was notified in their private ticket.",
+                ephemeral=True,
+            )
+            return
+        try:
+            warrant = await asyncio.to_thread(
+                GoogleWorkspaceService(
+                    self.settings.google_service_account_file,
+                    self.environment.google_workspace.test_drive_folder_id or "",
+                ).generate_arrest_warrant,
+                template_document_id=config.template_document_id,
+                output_drive_folder_id=config.output_drive_folder_id,
+                request_id=submission.request_id,
+                replacements=replacements,
+                document_title=f"Search Seizure Warrant {submission.request_id}",
+                required_placeholders=set(replacements),
+            )
+        except Exception:
+            LOGGER.exception("Search / Seizure Warrant generation failed for %s", submission.request_id)
+            await interaction.followup.send(
+                "The warrant could not be generated. Check the Wispbyte console for the safe "
+                "diagnostic message.",
+                ephemeral=True,
+            )
+            return
+        if warrant.page_count != 1:
+            await self._notify_warrant_fit_failure(
+                channel, submission, "the completed warrant would exceed the required one-page limit"
+            )
+            await interaction.followup.send(
+                "No player-facing warrant was issued because the completed document is not exactly one page.",
+                ephemeral=True,
+            )
+            return
+        await self._post_search_seizure_warrant(
+            channel=channel, submission=submission, warrant=warrant, approved=False
+        )
+        await interaction.followup.send(
+            f"Issued the one-page warrant in {channel.mention}.", ephemeral=True
+        )
+
+    async def _approve_search_seizure_warrant(self, interaction: discord.Interaction) -> None:
+        if not self._can_approve_warrant(interaction):
+            await interaction.response.send_message(
+                "Only a configured Judge or bot administrator can approve a Search / Seizure Warrant.",
+                ephemeral=True,
+            )
+            return
+        if not isinstance(interaction.channel, discord.TextChannel):
+            await interaction.response.send_message(
+                "Run this command inside the private Court Order ticket.", ephemeral=True
+            )
+            return
+        config = self.environment.court_order_search_seizure_warrant
+        if not config or not self.settings.google_service_account_file:
+            await interaction.response.send_message(
+                "The Search / Seizure Warrant template is not configured on this host yet.",
+                ephemeral=True,
+            )
+            return
+        submission = await self.store.get_by_channel_id(interaction.channel.id)
+        if not submission or submission.workflow != "court_order" or not self._is_search_seizure_warrant(submission):
+            await interaction.response.send_message(
+                "This channel does not contain a Search / Seizure Warrant request.", ephemeral=True
+            )
+            return
+        if not submission.claimed_user_id:
+            await interaction.response.send_message(
+                "The requester must verify ownership before judicial approval.", ephemeral=True
+            )
+            return
+        if submission.status == "approved":
+            await interaction.response.send_message(
+                "This Search / Seizure Warrant has already been approved.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        replacements, validation_error = self._search_seizure_warrant_replacements(submission=submission)
+        if validation_error:
+            await self._notify_warrant_fit_failure(interaction.channel, submission, validation_error)
+            await interaction.followup.send(
+                "No warrant was approved. The requester was notified in their private ticket.",
+                ephemeral=True,
+            )
+            return
+        approver_name = interaction.user.display_name.strip() or interaction.user.name
+        approved_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+        issue_date = datetime.now(UTC).strftime("%B %d, %Y").replace(" 0", " ")
+        replacements.update({"{{APPROVER_NAME}}": approver_name, "{{ISSUE_DATE}}": issue_date})
+        try:
+            warrant = await asyncio.to_thread(
+                GoogleWorkspaceService(
+                    self.settings.google_service_account_file,
+                    self.environment.google_workspace.test_drive_folder_id or "",
+                ).generate_arrest_warrant,
+                template_document_id=config.template_document_id,
+                output_drive_folder_id=config.output_drive_folder_id,
+                request_id=submission.request_id,
+                replacements=replacements,
+                document_title=f"Approved Search Seizure Warrant {submission.request_id}",
+                required_placeholders=set(replacements),
+            )
+        except Exception:
+            LOGGER.exception("Search / Seizure Warrant approval generation failed for %s", submission.request_id)
+            await interaction.followup.send(
+                "The approved warrant could not be generated. Check the Wispbyte console for the safe "
+                "diagnostic message.",
+                ephemeral=True,
+            )
+            return
+        if warrant.page_count != 1:
+            await self._notify_warrant_fit_failure(
+                interaction.channel, submission, "the approved warrant would exceed the required one-page limit"
+            )
+            await interaction.followup.send(
+                "No approved player-facing warrant was issued because the completed document is not "
+                "exactly one page.",
+                ephemeral=True,
+            )
+            return
+        await self._post_search_seizure_warrant(
+            channel=interaction.channel,
+            submission=submission,
+            warrant=warrant,
+            approved=True,
+            issue_date=issue_date,
+            approver_mention=interaction.user.mention,
+        )
+        recorded = await self.store.mark_warrant_approved(
+            submission_id=submission.id,
+            approver_user_id=interaction.user.id,
+            approver_name=approver_name,
+            approved_at=approved_at,
+            approved_document_id=warrant.document_id,
+        )
+        if not recorded:
+            LOGGER.warning("Search / Seizure approval was posted but audit state changed for %s", submission.request_id)
+        await interaction.followup.send(
+            f"Approved and posted the signed one-page warrant in {interaction.channel.mention}.",
+            ephemeral=True,
+        )
+
+    async def _deny_search_seizure_warrant(
+        self, interaction: discord.Interaction, denial_notes: str
+    ) -> None:
+        if not self._can_deny_warrant(interaction):
+            await interaction.response.send_message(
+                "Only a configured Judge or bot administrator can deny a Search / Seizure Warrant.",
+                ephemeral=True,
+            )
+            return
+        if not isinstance(interaction.channel, discord.TextChannel):
+            await interaction.response.send_message(
+                "Run this command inside the private Court Order ticket.", ephemeral=True
+            )
+            return
+        denial_notes = denial_notes.strip()
+        if not denial_notes or len(denial_notes) > 1000:
+            await interaction.response.send_message(
+                "Denial notes are required and must be 1,000 characters or fewer.", ephemeral=True
+            )
+            return
+        submission = await self.store.get_by_channel_id(interaction.channel.id)
+        if not submission or submission.workflow != "court_order" or not self._is_search_seizure_warrant(submission):
+            await interaction.response.send_message(
+                "This channel does not contain a Search / Seizure Warrant request.", ephemeral=True
+            )
+            return
+        if submission.status == "closed":
+            await interaction.response.send_message(
+                "This request is already closed and cannot be denied.", ephemeral=True
+            )
+            return
+        if submission.status == "approved":
+            await interaction.response.send_message(
+                "This Search / Seizure Warrant was already approved and cannot be denied.", ephemeral=True
+            )
+            return
+        if submission.status == "denied":
+            await interaction.response.send_message(
+                "This Search / Seizure Warrant has already been denied. A corrected Form submission can "
+                "reference this request ID to continue here.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        denied_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+        denier_name = interaction.user.display_name.strip() or interaction.user.name
+        recorded = await self.store.mark_warrant_denied(
+            submission_id=submission.id,
+            denier_user_id=interaction.user.id,
+            denier_name=denier_name,
+            denied_at=denied_at,
+            denial_note=denial_notes,
+        )
+        if not recorded:
+            await interaction.followup.send(
+                "The denial could not be recorded because this request changed state. Please retry "
+                "only after staff review the ticket.",
+                ephemeral=True,
+            )
+            return
+        await interaction.channel.send(
+            f"**Search / Seizure Warrant denied** by {interaction.user.mention}.\n"
+            f"**Denial notes:** {denial_notes}\n\n"
+            "This ticket remains open. To submit a correction, complete a new Court Order Form and "
+            f"enter **{submission.request_id}** in the Docket / Off-Docket Name/ID field; the bot "
+            "will post the new submission in this same ticket."
+        )
+        await interaction.followup.send(
+            f"Denied **{submission.request_id}** and recorded the denial notes in this ticket.",
+            ephemeral=True,
+        )
+
+    async def _post_search_seizure_warrant(
+        self,
+        *,
+        channel: discord.TextChannel,
+        submission: Submission,
+        warrant: GeneratedWarrant,
+        approved: bool,
+        issue_date: str | None = None,
+        approver_mention: str | None = None,
+    ) -> None:
+        """Post the verified PNG and optional FiveManage URL without blocking the record."""
+        filename = (
+            f"approved-search-seizure-warrant-{submission.request_id.lower()}.png"
+            if approved
+            else f"search-seizure-warrant-{submission.request_id.lower()}.png"
+        )
+        fivemanage_url: str | None = None
+        if self.settings.fivemanage_api_token:
+            try:
+                upload = await asyncio.to_thread(
+                    FiveManageService(
+                        self.settings.fivemanage_api_token, self.settings.fivemanage_storage_path
+                    ).upload_png,
+                    filename=filename,
+                    content=warrant.png_bytes,
+                    request_id=submission.request_id,
+                )
+                fivemanage_url = upload.url
+            except Exception:
+                LOGGER.exception("FiveManage upload failed for Search / Seizure Warrant %s", submission.request_id)
+        heading = "**Search / Seizure Warrant approved**" if approved else "One-page Search / Seizure Warrant generated"
+        message = (
+            f"{heading}"
+            + (f" by {approver_mention} on **{issue_date}**." if approved else f" for **{submission.request_id}**.")
+            + f"\nInternal document record: {warrant.document_url}"
+        )
+        if fivemanage_url:
+            message += f"\nFiveManage PNG URL: {fivemanage_url}"
+        elif self.settings.fivemanage_api_token:
+            message += "\nFiveManage upload was unavailable; the PNG is attached here."
+        await channel.send(message, file=discord.File(BytesIO(warrant.png_bytes), filename=filename))
 
     async def _sync_court_order_responses(self) -> int:
         """Read new source rows once and route each one to a private ticket."""
@@ -1510,13 +1848,21 @@ class NerpFormsBot(discord.Client):
             'Has the Case or it\'s evidence been designated "Classified"',
         )
         classified = "Classified" if classified_answer.lower() in {"yes", "y"} else "Unclassified"
-        subjects = self._answers_for_prefix(submission.payload, "Subject / Arrestee Name:")
+        is_search_seizure = self._is_search_seizure_warrant(submission)
+        subjects = self._answers_for_prefix(
+            submission.payload,
+            "Subject Name of Search or Seizure:" if is_search_seizure else "Subject / Arrestee Name:",
+        )
         citizen_ids = self._answers_for_prefix(submission.payload, "Subject Citizen ID:")
         charges = self._answers_for_prefix(
-            submission.payload, "Initial Charges To Be Filed Against Subject:"
+            submission.payload,
+            "Request Type:" if is_search_seizure else "Initial Charges To Be Filed Against Subject:",
         )
         probable_causes = self._answers_for_prefix(
-            submission.payload, "Probable Cause For Arrest:"
+            submission.payload,
+            "Probable Cause For Search or Seizure:"
+            if is_search_seizure
+            else "Probable Cause For Arrest:",
         )
         evidence_links = self._answers_for_prefix(submission.payload, "Please include any evidence")
         subject_lines = [
@@ -1817,14 +2163,71 @@ class NerpFormsBot(discord.Client):
             replacements[f"{{{{SUBJECT_{number}_INITIAL_CHARGES}}}}"] = self._value_at(charges, index)
         return replacements, None
 
+    def _search_seizure_warrant_replacements(
+        self,
+        *,
+        submission: Submission,
+    ) -> tuple[dict[str, str], str | None]:
+        """Build a three-subject Search / Seizure template without truncating facts."""
+        subjects = self._answers_for_prefix(
+            submission.payload, "Subject Name of Search or Seizure:"
+        )
+        citizen_ids = self._answers_for_prefix(submission.payload, "Subject Citizen ID:")
+        incident_dates = self._answers_for_prefix(submission.payload, "Date Of Incident:")
+        warrant_types = self._answers_for_prefix(submission.payload, "Request Type:")
+        probable_causes = self._answers_for_prefix(
+            submission.payload, "Probable Cause For Search or Seizure:"
+        )
+        subject_count = max(
+            len(subjects), len(citizen_ids), len(incident_dates), len(warrant_types), len(probable_causes)
+        )
+        if subject_count > 3:
+            return {}, "the request contains more than the supported three subjects"
+        probable_cause = "\n\n".join(probable_causes)
+        if len(probable_cause) > 2080:
+            return {}, "the combined probable-cause statement exceeds the 2,080-character limit"
+        classified_answer = self._answer_prefix(
+            submission.payload,
+            'Has the Case or it\'s evidence been designated "Classified"',
+        )
+        classified_designation = (
+            "Classified" if classified_answer.strip().lower() in {"yes", "y"} else "Unclassified"
+        )
+        replacements = {
+            "{{REQUEST_ID}}": submission.request_id,
+            "{{DOCKET_ID}}": self._existing_docket_reference(submission.payload) or "N/A",
+            "{{CLASSIFIED}}": classified_designation,
+            "{{REQUESTER_NAME}}": self._answer(submission.payload, "Requestors Name:") or "N/A",
+            "{{REQUESTING_AGENCY}}": self._answer(submission.payload, "Requesting Agency:") or "N/A",
+            "{{PCO}}": self._answer(submission.payload, "Primary Case Officer") or "N/A",
+            "{{CASE_OFFICER_AGENCY}}": self._answer(
+                submission.payload, "Law Enforcement Agency Assigned to Case:"
+            ) or "N/A",
+            "{{PROBABLE_CAUSE}}": probable_cause or "N/A",
+            "{{APPROVER_NAME}}": "Pending judicial approval",
+            "{{ISSUE_DATE}}": "Pending approval",
+        }
+        for number in range(1, 4):
+            index = number - 1
+            replacements[f"{{{{SUBJECT_{number}_NAME}}}}"] = self._value_at(subjects, index)
+            replacements[f"{{{{S{number}ID}}}}"] = self._value_at(citizen_ids, index)
+            replacements[f"{{{{SUBJECT_{number}_INCIDENT_DATE}}}}"] = self._value_at(
+                incident_dates, index
+            )
+            replacements[f"{{{{SUBJECT_{number}_WARRANT_TYPE}}}}"] = self._value_at(
+                warrant_types, index
+            )
+        return replacements, None
+
     async def _notify_warrant_fit_failure(
         self, channel: discord.TextChannel, submission: Submission, reason: str
     ) -> None:
         """Tell the verified requester why no player-facing warrant was issued."""
         requester = channel.guild.get_member(submission.claimed_user_id or 0)
         mention = requester.mention if requester else "The verified requester"
+        warrant_name = "Search / Seizure Warrant" if self._is_search_seizure_warrant(submission) else "Arrest Warrant"
         await channel.send(
-            f"{mention}, no player-facing Arrest Warrant was issued for **{submission.request_id}** "
+            f"{mention}, no player-facing {warrant_name} was issued for **{submission.request_id}** "
             f"because {reason}. Please shorten or revise the relevant information with DOJ staff, "
             "then request a new warrant generation. Your information was not silently truncated."
         )
@@ -1849,10 +2252,19 @@ class NerpFormsBot(discord.Client):
 
     def _court_order_subject_details(self, payload: dict[str, str]) -> list[str]:
         """Render every submitted subject in the private intake ticket without omitting repeats."""
-        subjects = self._answers_for_prefix(payload, "Subject / Arrestee Name:")
+        is_search_seizure = self._answer(payload, "Request Type").strip().casefold() == "search or seizure warrant"
+        subjects = self._answers_for_prefix(
+            payload, "Subject Name of Search or Seizure:" if is_search_seizure else "Subject / Arrestee Name:"
+        )
         citizen_ids = self._answers_for_prefix(payload, "Subject Citizen ID:")
-        charges = self._answers_for_prefix(payload, "Initial Charges To Be Filed Against Subject:")
-        probable_causes = self._answers_for_prefix(payload, "Probable Cause For Arrest:")
+        details_label = "Warrant type" if is_search_seizure else "Initial charges"
+        charges = self._answers_for_prefix(
+            payload, "Request Type:" if is_search_seizure else "Initial Charges To Be Filed Against Subject:"
+        )
+        probable_causes = self._answers_for_prefix(
+            payload,
+            "Probable Cause For Search or Seizure:" if is_search_seizure else "Probable Cause For Arrest:",
+        )
         evidence_links = self._answers_for_prefix(payload, "Please include any evidence")
         count = max([len(subjects), len(citizen_ids), len(charges), len(probable_causes), len(evidence_links)])
         return [
@@ -1860,7 +2272,7 @@ class NerpFormsBot(discord.Client):
                 (
                     f"**Name:** {self._value_at(subjects, index)}",
                     f"**Citizen ID:** {self._value_at(citizen_ids, index)}",
-                    f"**Initial charges:** {self._value_at(charges, index)}",
+                    f"**{details_label}:** {self._value_at(charges, index)}",
                     f"**Probable cause:** {self._value_at(probable_causes, index)}",
                     f"**Evidence links:** {self._value_at(evidence_links, index)}",
                 )
@@ -1887,6 +2299,9 @@ class NerpFormsBot(discord.Client):
 
     def _is_arrest_warrant(self, submission: Submission) -> bool:
         return self._request_type(submission).casefold() == "arrest warrant"
+
+    def _is_search_seizure_warrant(self, submission: Submission) -> bool:
+        return self._request_type(submission).casefold() == "search or seizure warrant"
 
     @staticmethod
     def _answer(payload: dict[str, str], *names: str) -> str:

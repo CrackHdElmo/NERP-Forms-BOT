@@ -129,6 +129,50 @@ def test_only_arrest_warrant_uses_arrest_warrant_commands() -> None:
     assert not bot._is_arrest_warrant(_submission({"Request Type": "Search or Seizure Warrant"}))
 
 
+def test_search_seizure_warrant_replacements_keep_three_subjects_distinct() -> None:
+    payload = {
+        "Request Type": "Search or Seizure Warrant",
+        "Requestors Name:": "Officer Example",
+        "Requesting Agency:": "LSPD",
+        "Subject Name of Search or Seizure:": "Property One",
+        "Subject Name of Search or Seizure: (2)": "Vehicle Two",
+        "Subject Citizen ID:": "1001",
+        "Subject Citizen ID: (2)": "1002",
+        "Date Of Incident:": "September 20, 2026",
+        "Date Of Incident: (2)": "September 19, 2026",
+        "Request Type:": "Search",
+        "Request Type: (2)": "Seizure",
+        "Probable Cause For Search or Seizure:": "Cause one.",
+        "Probable Cause For Search or Seizure: (2)": "Cause two.",
+    }
+
+    replacements, error = _bot()._search_seizure_warrant_replacements(
+        submission=_submission(payload)
+    )
+
+    assert error is None
+    assert replacements["{{SUBJECT_1_NAME}}"] == "Property One"
+    assert replacements["{{SUBJECT_2_NAME}}"] == "Vehicle Two"
+    assert replacements["{{SUBJECT_1_INCIDENT_DATE}}"] == "September 20, 2026"
+    assert replacements["{{SUBJECT_2_WARRANT_TYPE}}"] == "Seizure"
+    assert replacements["{{SUBJECT_3_NAME}}"] == "N/A"
+    assert replacements["{{PROBABLE_CAUSE}}"] == "Cause one.\n\nCause two."
+
+
+def test_search_seizure_replacements_reject_more_than_three_subjects() -> None:
+    payload = {
+        "Request Type": "Search or Seizure Warrant",
+        "Subject Name of Search or Seizure:": "One",
+        "Subject Name of Search or Seizure: (2)": "Two",
+        "Subject Name of Search or Seizure: (3)": "Three",
+        "Subject Name of Search or Seizure: (4)": "Four",
+    }
+
+    _, error = _bot()._search_seizure_warrant_replacements(submission=_submission(payload))
+
+    assert error == "the request contains more than the supported three subjects"
+
+
 def test_setup_plan_uses_safe_resource_names_without_changing_category_case() -> None:
     plan = _bot()._default_setup_plan(
         "court_administration",

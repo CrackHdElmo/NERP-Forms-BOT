@@ -4,11 +4,11 @@ This guide takes a new administrator from an empty Discord application to a
 working **test** deployment of NERP Forms BOT. Complete the test workflow
 before configuring a live community.
 
-The currently implemented player-facing document workflow is the **Arrest
-Warrant** option within the Court Order Form. The expanded Court Order Form may
-receive other request types and the bot will preserve them in their private
-tickets, but it clearly identifies that their dedicated document-generation and
-judicial commands are not configured yet. The Discord setup wizard can also
+The currently implemented player-facing document workflows are the **Arrest
+Warrant** and **Search or Seizure Warrant** options within the Court Order Form.
+The expanded Court Order Form may receive other request types and the bot will
+preserve them in their private tickets, but it clearly identifies that their
+dedicated document-generation and judicial commands are not configured yet. The Discord setup wizard can also
 create and register the base resources for Dockets, Attorney Requests, and
 Business Licensing, but those additional form workflows should not be
 represented as automated until their individual intake and review rules have
@@ -237,12 +237,13 @@ an existing ticket name, or an already-open Docket/Off-Docket reference in the
 Form's Docket / Off-Docket field. The bot will reuse the matching open request
 rather than opening a duplicate private ticket.
 
-## 6. Prepare the Arrest Warrant template
+## 6. Prepare the Court Order warrant templates
 
-Use a native **Google Doc**, not a Word file, as the active template. Share it
-with the service account and put its document ID in
-`court_order_warrant.template_document_id`. Set the target Shared Drive folder
-ID in `court_order_warrant.output_drive_folder_id`.
+Use native **Google Docs**, not Word files, as the active templates. Share each
+template with the service account. Configure the Arrest Warrant under
+`court_order_warrant` and the Search / Seizure Warrant under
+`court_order_search_seizure_warrant`. Each config block needs its template
+document ID and the Shared Drive output-folder ID.
 
 The template uses the following exact placeholders:
 
@@ -254,13 +255,10 @@ The template uses the following exact placeholders:
 {{SUBJECT_1_NAME}}          {{S1ID}}                   {{SUBJECT_1_INITIAL_CHARGES}}
 {{SUBJECT_2_NAME}}          {{S2ID}}                   {{SUBJECT_2_INITIAL_CHARGES}}
 {{SUBJECT_3_NAME}}          {{S3ID}}                   {{SUBJECT_3_INITIAL_CHARGES}}
-{{SUBJECT_4_NAME}}          {{S4ID}}                   {{SUBJECT_4_INITIAL_CHARGES}}
-{{SUBJECT_5_NAME}}          {{S5ID}}                   {{SUBJECT_5_INITIAL_CHARGES}}
-{{SUBJECT_6_NAME}}          {{S6ID}}                   {{SUBJECT_6_INITIAL_CHARGES}}
 {{APPROVER_NAME}}           {{ISSUE_DATE}}
 ```
 
-Put the six subject rows and the probable-cause area in ordinary Google Docs
+Put the three subject rows and the probable-cause area in ordinary Google Docs
 tables, not text boxes. The final document must be one page. The bot rejects
 rather than truncates a result when any initial charge exceeds 88 characters,
 the combined probable-cause text exceeds 2,080 characters, or the rendered PDF
@@ -271,6 +269,21 @@ For electronic approval, leave `/s/ {{APPROVER_NAME}}` on the signature line
 and place `{{APPROVER_NAME}}, Judge` and `{{ISSUE_DATE}}` in the related
 signature/date fields. The bot creates a distinct approved copy of the
 document; it does not overwrite the master template.
+
+The Search / Seizure template uses the shared header, probable-cause, and
+approval placeholders above, plus these exact table placeholders:
+
+```text
+{{SUBJECT_1_NAME}}          {{S1ID}}                   {{SUBJECT_1_INCIDENT_DATE}}  {{SUBJECT_1_WARRANT_TYPE}}
+{{SUBJECT_2_NAME}}          {{S2ID}}                   {{SUBJECT_2_INCIDENT_DATE}}  {{SUBJECT_2_WARRANT_TYPE}}
+{{SUBJECT_3_NAME}}          {{S3ID}}                   {{SUBJECT_3_INCIDENT_DATE}}  {{SUBJECT_3_WARRANT_TYPE}}
+```
+
+Its Form responses must use **Search or Seizure Warrant** as the main request
+type, with the per-subject `Request Type:` answer set to **Search** or
+**Seizure**. The bot refuses to generate if any required placeholder is missing
+from the template, the combined probable cause is over 2,080 characters, or the
+finished document would not fit on exactly one page.
 
 ## 7. Connect Wispbyte to GitHub and add protected values
 
@@ -358,6 +371,9 @@ environment when old Sheet rows must not create a flood of tickets.
 | `/generate-arrest-warrant` | Verified requester or bot administrator | Creates the one-page PNG warrant for the current claimed request |
 | `/approve-arrest-warrant` | Configured Judge or bot administrator | Electronically approves the warrant |
 | `/deny-arrest-warrant` | Configured Judge or bot administrator | Denies it with required notes; it can later be approved by an authorized reviewer |
+| `/generate-search-seizure-warrant` | Verified requester or bot administrator | Creates the one-page PNG Search / Seizure Warrant for the current claimed request |
+| `/approve-search-seizure-warrant` | Configured Judge or bot administrator | Electronically approves the Search / Seizure Warrant |
+| `/deny-search-seizure-warrant` | Configured Judge or bot administrator | Denies it with required notes; it can later be approved by an authorized reviewer |
 | `/close-ticket` | Verified requester, Judge, Attorney General, or administrator | Posts staff record then closes/removes private ticket |
 
 ## Troubleshooting
@@ -371,7 +387,7 @@ environment when old Sheet rows must not create a flood of tickets.
 | Drive reports storage quota exceeded | Use a Shared Drive and give the service account proper membership; service accounts should not be used as personal Drive storage |
 | Form response has not appeared | Verify the correct response Sheet ID/tab name, wait 60–120 seconds, or use `/court-order-sync` as an administrator |
 | Requester cannot claim | The Discord username submitted on the Form must match their current server username; correct and resubmit if it does not |
-| Warrant generation fails | Check template placeholders, Google Docs API access, document sharing, six-subject/character limits, and one-page layout |
+| Warrant generation fails | Check template placeholders, Google Docs API access, document sharing, three-subject/character limits, and one-page layout |
 | FiveManage URL is absent | Treat it as optional; verify the protected token and storage path while confirming the Discord PNG was still created |
 | Changes pushed to GitHub do not appear | Confirm Wispbyte synchronized the selected branch, then restart the server |
 

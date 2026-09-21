@@ -29,6 +29,11 @@ court_order_warrant:
   template_document_id: 1Mp2ALt82lIVIJ_d9lr4TD0kx7U_ybWF9gBV4eZtWl2o
   output_drive_folder_id: 1tSB26NtY7wX5I0yRhUfVrRXj0B3ADItb
 
+court_order_search_seizure_warrant:
+  # Native Google Doc template for the Search / Seizure Warrant workflow.
+  template_document_id: 12wCoKHco_ZVoxR5CMXXS0KbB_BUG3J7ptCBeAnNqUjo
+  output_drive_folder_id: 1tSB26NtY7wX5I0yRhUfVrRXj0B3ADItb
+
 roles:
   administrators:
     - 1414109505805094938 # Mod (test server)

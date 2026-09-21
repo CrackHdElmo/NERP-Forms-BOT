@@ -102,6 +102,12 @@ Within that request's private ticket, a configured Judge or bot administrator ca
 and issue-date placeholders, records the approval as `/s/ Judge Name`, records the approver's
 Discord identity and UTC approval time, and prevents a second approval for the same request.
 
+The same guarded workflow is available for **Search or Seizure Warrant** Form responses through
+`/generate-search-seizure-warrant`, `/approve-search-seizure-warrant`, and
+`/deny-search-seizure-warrant`. It supports up to three subjects, fills each subject's name,
+Citizen ID, Date of Incident, and selected Search/Seizure type, and applies the same one-page PNG
+and later-approval safeguards as the Arrest Warrant flow.
+
 When `FIVEMANAGE_API_TOKEN` is configured only in protected host settings, the bot also uploads
 the approved PNG to FiveManage and posts its returned CDN URL alongside the attached PNG. A
 FiveManage failure never prevents the verified PNG from being posted to the private ticket.

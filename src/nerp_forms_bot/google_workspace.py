@@ -233,6 +233,7 @@ class GoogleWorkspaceService:
         request_id: str,
         replacements: dict[str, str],
         document_title: str | None = None,
+        required_placeholders: set[str] | None = None,
     ) -> GeneratedWarrant:
         """Copy a native template, fill it, and render its single PDF page to PNG.
 
@@ -241,6 +242,14 @@ class GoogleWorkspaceService:
         """
         drive = self._drive_service()
         docs = build("docs", "v1", credentials=self._credentials(), cache_discovery=False)
+        if required_placeholders:
+            template_text = docs.documents().get(documentId=template_document_id).execute()
+            present_text = self._document_text(template_text)
+            missing = sorted(placeholder for placeholder in required_placeholders if placeholder not in present_text)
+            if missing:
+                raise ValueError(
+                    "The configured template is missing required placeholders: " + ", ".join(missing)
+                )
         copied = drive.files().copy(
             fileId=template_document_id,
             body={
@@ -294,6 +303,17 @@ class GoogleWorkspaceService:
             return rendered.tobytes("png")
         finally:
             document.close()
+
+    @staticmethod
+    def _document_text(value: object) -> str:
+        """Collect visible text from Docs paragraphs and nested table cells."""
+        if isinstance(value, dict):
+            if "textRun" in value:
+                return str(value["textRun"].get("content", ""))
+            return "".join(GoogleWorkspaceService._document_text(child) for child in value.values())
+        if isinstance(value, list):
+            return "".join(GoogleWorkspaceService._document_text(child) for child in value)
+        return ""
 
     def _sheets_service(self):
         credentials = self._credentials()

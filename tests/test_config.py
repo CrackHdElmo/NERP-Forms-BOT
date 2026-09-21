@@ -16,3 +16,8 @@ def test_altitude_government_profile_loads() -> None:
     assert config.court_order_intake.response_sheet_name == "Form Responses 1"
     assert config.court_order_warrant is not None
     assert config.court_order_warrant.template_document_id == "1Mp2ALt82lIVIJ_d9lr4TD0kx7U_ybWF9gBV4eZtWl2o"
+    assert config.court_order_search_seizure_warrant is not None
+    assert (
+        config.court_order_search_seizure_warrant.template_document_id
+        == "12wCoKHco_ZVoxR5CMXXS0KbB_BUG3J7ptCBeAnNqUjo"
+    )
