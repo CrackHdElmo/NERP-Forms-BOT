@@ -788,6 +788,10 @@ class NerpFormsBot(discord.Client):
                     read_message_history=True,
                     attach_files=True,
                 )
+                await channel.edit(
+                    name=self._court_order_ticket_name(submission, interaction.user),
+                    reason=f"NERP Forms BOT verified claimant for {submission.request_id}",
+                )
                 await self.store.mark_claimed(submission.id, interaction.user.id)
                 if submission.tracker_spreadsheet_id and submission.tracker_row:
                     await asyncio.to_thread(
@@ -2015,7 +2019,7 @@ class NerpFormsBot(discord.Client):
                         attach_files=True,
                     )
         channel = await guild.create_text_channel(
-            name=f"court-order-{submission.request_id.lower()}",
+            name=self._court_order_ticket_name(submission),
             category=category,
             overwrites=overwrites,
             topic=f"Court Order request {submission.request_id}; awaiting claimant verification.",
@@ -2023,6 +2027,31 @@ class NerpFormsBot(discord.Client):
         )
         await self._post_court_order_intake(channel, submission)
         return channel
+
+    @staticmethod
+    def _discord_channel_name_component(value: str, *, fallback: str) -> str:
+        """Turn a Discord display name into a short, stable channel-name component."""
+        normalized = re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
+        return normalized or fallback
+
+    def _court_order_ticket_name(
+        self,
+        submission: Submission,
+        requester: discord.Member | None = None,
+    ) -> str:
+        """Use the request ID plus a claimant nickname, without the redundant workflow prefix."""
+        requester_label = (
+            requester.nick
+            if requester and requester.nick
+            else requester.name if requester else submission.requester_username
+        )
+        request_component = self._discord_channel_name_component(
+            submission.request_id, fallback="court-order"
+        )
+        requester_component = self._discord_channel_name_component(
+            requester_label, fallback="requester"
+        )
+        return f"{request_component}-{requester_component}"[:100].rstrip("-")
 
     async def _find_reusable_court_order_ticket(
         self, reference: str

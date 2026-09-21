@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from nerp_forms_bot.config import load_environment
 from nerp_forms_bot.main import NerpFormsBot, Settings
@@ -120,6 +121,20 @@ def test_docket_or_off_docket_reference_accepts_google_forms_nonbreaking_spaces(
     }
 
     assert _bot()._existing_docket_reference(payload) == "COR-000007"
+
+
+def test_court_order_ticket_name_uses_requester_username_then_server_nickname() -> None:
+    bot = _bot()
+    submission = _submission({})
+
+    assert bot._court_order_ticket_name(submission) == "cor-000001-tester"
+    assert (
+        bot._court_order_ticket_name(
+            submission,
+            SimpleNamespace(nick="Nik Skyy", name="nikskyy"),
+        )
+        == "cor-000001-nik-skyy"
+    )
 
 
 def test_only_arrest_warrant_uses_arrest_warrant_commands() -> None:
