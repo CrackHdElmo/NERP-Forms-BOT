@@ -240,3 +240,93 @@ def test_form_refresh_updates_an_active_ticket_but_preserves_closed_case_data(tm
     assert active.payload["Subject Name of Search or Seizure:"] == "Current form value"
     assert closed is not None
     assert closed.payload == {"Request Type": "Arrest Warrant"}
+
+
+def test_case_assignment_and_accepted_transfer_are_auditable(tmp_path) -> None:
+    async def exercise() -> tuple[object, object, object]:
+        store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
+        await store.initialize()
+        submission = await store.begin_submission(
+            source_key="sheet:assignment",
+            workflow="court_order",
+            requester_username="requester",
+            payload={},
+        )
+        assert submission is not None
+        await store.set_case_assignment(
+            submission_id=submission.id,
+            assignment_type="prosecutor",
+            user_id=10,
+            user_name="Original Prosecutor",
+            assigned_by_user_id=10,
+            assigned_by_name="Original Prosecutor",
+            assigned_at="2026-09-21T12:00:00+00:00",
+        )
+        offer = await store.propose_assignment_transfer(
+            submission_id=submission.id,
+            assignment_type="prosecutor",
+            from_user_id=10,
+            from_user_name="Original Prosecutor",
+            to_user_id=11,
+            to_user_name="Receiving Prosecutor",
+            proposed_by_user_id=10,
+            proposed_by_name="Original Prosecutor",
+            proposed_at="2026-09-21T12:01:00+00:00",
+        )
+        pending = await store.get_pending_assignment_transfer(
+            submission_id=submission.id,
+            assignment_type="prosecutor",
+            recipient_user_id=11,
+        )
+        accepted = await store.accept_assignment_transfer(
+            offer,
+            accepted_at="2026-09-21T12:02:00+00:00",
+        )
+        return accepted, await store.get_case_assignments(submission.id), pending
+
+    accepted, assignments, pending = asyncio.run(exercise())
+
+    assert accepted is True
+    assert pending is not None
+    assert assignments[0].assignment_type == "prosecutor"
+    assert assignments[0].user_id == 11
+    assert assignments[0].assigned_by_user_id == 10
+
+
+def test_court_order_docket_merge_tracks_its_destination_and_sync_checkpoint(tmp_path) -> None:
+    async def exercise() -> object:
+        store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
+        await store.initialize()
+        submission = await store.begin_submission(
+            source_key="sheet:merge",
+            workflow="court_order",
+            requester_username="requester",
+            payload={},
+        )
+        assert submission is not None
+        await store.record_court_order_docket_merge(
+            submission_id=submission.id,
+            docket_thread_id=200,
+            merged_by_user_id=42,
+            merged_by_name="Judge Example",
+            merged_at="2026-09-21T12:00:00+00:00",
+            last_forwarded_message_id=300,
+            source_closed=False,
+        )
+        await store.record_court_order_docket_merge(
+            submission_id=submission.id,
+            docket_thread_id=200,
+            merged_by_user_id=42,
+            merged_by_name="Judge Example",
+            merged_at="2026-09-21T12:05:00+00:00",
+            last_forwarded_message_id=301,
+            source_closed=True,
+        )
+        return await store.get_court_order_docket_merge(submission.id)
+
+    merge = asyncio.run(exercise())
+
+    assert merge is not None
+    assert merge.docket_thread_id == 200
+    assert merge.last_forwarded_message_id == 301
+    assert merge.source_closed is True

@@ -36,6 +36,50 @@ class Submission:
     closed_note: str | None
 
 
+@dataclass(frozen=True)
+class CaseAssignment:
+    """One current judicial or counsel assignment for a tracked request."""
+
+    submission_id: int
+    assignment_type: str
+    user_id: int
+    user_name: str
+    assigned_by_user_id: int
+    assigned_by_name: str
+    assigned_at: str
+
+
+@dataclass(frozen=True)
+class AssignmentTransfer:
+    """A pending or completed handoff that retains who initiated it."""
+
+    id: int
+    submission_id: int
+    assignment_type: str
+    from_user_id: int | None
+    from_user_name: str | None
+    to_user_id: int
+    to_user_name: str
+    proposed_by_user_id: int
+    proposed_by_name: str
+    proposed_at: str
+    status: str
+    accepted_at: str | None
+
+
+@dataclass(frozen=True)
+class CourtOrderDocketMerge:
+    """Audit state for Court Order messages forwarded into a Docket Forum post."""
+
+    submission_id: int
+    docket_thread_id: int
+    merged_by_user_id: int
+    merged_by_name: str
+    merged_at: str
+    last_forwarded_message_id: int | None
+    source_closed: bool
+
+
 class SubmissionStore:
     """Persist every source row before creating a Discord resource for it."""
 
@@ -64,6 +108,51 @@ class SubmissionStore:
                     claimed_user_id INTEGER,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            await database.execute(
+                """
+                CREATE TABLE IF NOT EXISTS case_assignments (
+                    submission_id INTEGER NOT NULL,
+                    assignment_type TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    user_name TEXT NOT NULL,
+                    assigned_by_user_id INTEGER NOT NULL,
+                    assigned_by_name TEXT NOT NULL,
+                    assigned_at TEXT NOT NULL,
+                    PRIMARY KEY (submission_id, assignment_type)
+                )
+                """
+            )
+            await database.execute(
+                """
+                CREATE TABLE IF NOT EXISTS assignment_transfers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    submission_id INTEGER NOT NULL,
+                    assignment_type TEXT NOT NULL,
+                    from_user_id INTEGER,
+                    from_user_name TEXT,
+                    to_user_id INTEGER NOT NULL,
+                    to_user_name TEXT NOT NULL,
+                    proposed_by_user_id INTEGER NOT NULL,
+                    proposed_by_name TEXT NOT NULL,
+                    proposed_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    accepted_at TEXT
+                )
+                """
+            )
+            await database.execute(
+                """
+                CREATE TABLE IF NOT EXISTS court_order_docket_merges (
+                    submission_id INTEGER PRIMARY KEY,
+                    docket_thread_id INTEGER NOT NULL,
+                    merged_by_user_id INTEGER NOT NULL,
+                    merged_by_name TEXT NOT NULL,
+                    merged_at TEXT NOT NULL,
+                    last_forwarded_message_id INTEGER,
+                    source_closed INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -258,6 +347,14 @@ class SubmissionStore:
             row = await cursor.fetchone()
         return self._submission_from_row(row) if row else None
 
+    async def get_by_id(self, submission_id: int) -> Submission | None:
+        """Return a tracked request by its durable internal identifier."""
+        async with aiosqlite.connect(self.path) as database:
+            database.row_factory = aiosqlite.Row
+            cursor = await database.execute("SELECT * FROM submissions WHERE id = ?", (submission_id,))
+            row = await cursor.fetchone()
+        return self._submission_from_row(row) if row else None
+
     async def get_by_channel_id(self, channel_id: int) -> Submission | None:
         """Find the most recent request assigned to the current ticket or Forum post."""
         async with aiosqlite.connect(self.path) as database:
@@ -373,6 +470,231 @@ class SubmissionStore:
             await database.commit()
         return cursor.rowcount == 1
 
+    async def get_case_assignments(self, submission_id: int) -> list[CaseAssignment]:
+        """Return the current role assignments in a stable player-facing order."""
+        async with aiosqlite.connect(self.path) as database:
+            database.row_factory = aiosqlite.Row
+            cursor = await database.execute(
+                """
+                SELECT * FROM case_assignments WHERE submission_id = ?
+                ORDER BY CASE assignment_type
+                    WHEN 'prosecutor' THEN 1
+                    WHEN 'judge' THEN 2
+                    WHEN 'defense_attorney' THEN 3
+                    ELSE 4
+                END
+                """,
+                (submission_id,),
+            )
+            rows = await cursor.fetchall()
+        return [self._case_assignment_from_row(row) for row in rows]
+
+    async def set_case_assignment(
+        self,
+        *,
+        submission_id: int,
+        assignment_type: str,
+        user_id: int,
+        user_name: str,
+        assigned_by_user_id: int,
+        assigned_by_name: str,
+        assigned_at: str,
+    ) -> None:
+        """Set or reassign a named case role while retaining the assigning staff member."""
+        async with aiosqlite.connect(self.path) as database:
+            await database.execute(
+                """
+                INSERT INTO case_assignments
+                (submission_id, assignment_type, user_id, user_name, assigned_by_user_id,
+                 assigned_by_name, assigned_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(submission_id, assignment_type) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    user_name = excluded.user_name,
+                    assigned_by_user_id = excluded.assigned_by_user_id,
+                    assigned_by_name = excluded.assigned_by_name,
+                    assigned_at = excluded.assigned_at
+                """,
+                (
+                    submission_id,
+                    assignment_type,
+                    user_id,
+                    user_name,
+                    assigned_by_user_id,
+                    assigned_by_name,
+                    assigned_at,
+                ),
+            )
+            await database.commit()
+
+    async def propose_assignment_transfer(
+        self,
+        *,
+        submission_id: int,
+        assignment_type: str,
+        from_user_id: int | None,
+        from_user_name: str | None,
+        to_user_id: int,
+        to_user_name: str,
+        proposed_by_user_id: int,
+        proposed_by_name: str,
+        proposed_at: str,
+    ) -> AssignmentTransfer:
+        """Create one acceptance-required transfer and supersede any older pending offer."""
+        async with aiosqlite.connect(self.path) as database:
+            database.row_factory = aiosqlite.Row
+            await database.execute(
+                """
+                UPDATE assignment_transfers SET status = 'superseded'
+                WHERE submission_id = ? AND assignment_type = ? AND status = 'pending'
+                """,
+                (submission_id, assignment_type),
+            )
+            cursor = await database.execute(
+                """
+                INSERT INTO assignment_transfers
+                (submission_id, assignment_type, from_user_id, from_user_name, to_user_id,
+                 to_user_name, proposed_by_user_id, proposed_by_name, proposed_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                """,
+                (
+                    submission_id,
+                    assignment_type,
+                    from_user_id,
+                    from_user_name,
+                    to_user_id,
+                    to_user_name,
+                    proposed_by_user_id,
+                    proposed_by_name,
+                    proposed_at,
+                ),
+            )
+            await database.commit()
+            cursor = await database.execute(
+                "SELECT * FROM assignment_transfers WHERE id = ?", (cursor.lastrowid,)
+            )
+            row = await cursor.fetchone()
+        assert row is not None
+        return self._assignment_transfer_from_row(row)
+
+    async def get_pending_assignment_transfer(
+        self, *, submission_id: int, assignment_type: str, recipient_user_id: int
+    ) -> AssignmentTransfer | None:
+        """Return the one transfer that the current user is permitted to accept."""
+        async with aiosqlite.connect(self.path) as database:
+            database.row_factory = aiosqlite.Row
+            cursor = await database.execute(
+                """
+                SELECT * FROM assignment_transfers
+                WHERE submission_id = ? AND assignment_type = ? AND to_user_id = ? AND status = 'pending'
+                ORDER BY id DESC LIMIT 1
+                """,
+                (submission_id, assignment_type, recipient_user_id),
+            )
+            row = await cursor.fetchone()
+        return self._assignment_transfer_from_row(row) if row else None
+
+    async def get_assignment_transfers(self, submission_id: int) -> list[AssignmentTransfer]:
+        """Return the full handoff audit trail for a permanent case record."""
+        async with aiosqlite.connect(self.path) as database:
+            database.row_factory = aiosqlite.Row
+            cursor = await database.execute(
+                "SELECT * FROM assignment_transfers WHERE submission_id = ? ORDER BY id", (submission_id,)
+            )
+            rows = await cursor.fetchall()
+        return [self._assignment_transfer_from_row(row) for row in rows]
+
+    async def accept_assignment_transfer(
+        self, transfer: AssignmentTransfer, *, accepted_at: str) -> bool:
+        """Atomically accept an offer and make the recipient the current assignee."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute(
+                """
+                UPDATE assignment_transfers SET status = 'accepted', accepted_at = ?
+                WHERE id = ? AND status = 'pending'
+                """,
+                (accepted_at, transfer.id),
+            )
+            if cursor.rowcount != 1:
+                await database.commit()
+                return False
+            await database.execute(
+                """
+                INSERT INTO case_assignments
+                (submission_id, assignment_type, user_id, user_name, assigned_by_user_id,
+                 assigned_by_name, assigned_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(submission_id, assignment_type) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    user_name = excluded.user_name,
+                    assigned_by_user_id = excluded.assigned_by_user_id,
+                    assigned_by_name = excluded.assigned_by_name,
+                    assigned_at = excluded.assigned_at
+                """,
+                (
+                    transfer.submission_id,
+                    transfer.assignment_type,
+                    transfer.to_user_id,
+                    transfer.to_user_name,
+                    transfer.proposed_by_user_id,
+                    transfer.proposed_by_name,
+                    accepted_at,
+                ),
+            )
+            await database.commit()
+        return True
+
+    async def get_court_order_docket_merge(
+        self, submission_id: int
+    ) -> CourtOrderDocketMerge | None:
+        """Return the durable Docket target and last forwarded source message."""
+        async with aiosqlite.connect(self.path) as database:
+            database.row_factory = aiosqlite.Row
+            cursor = await database.execute(
+                "SELECT * FROM court_order_docket_merges WHERE submission_id = ?", (submission_id,)
+            )
+            row = await cursor.fetchone()
+        return self._court_order_docket_merge_from_row(row) if row else None
+
+    async def record_court_order_docket_merge(
+        self,
+        *,
+        submission_id: int,
+        docket_thread_id: int,
+        merged_by_user_id: int,
+        merged_by_name: str,
+        merged_at: str,
+        last_forwarded_message_id: int | None,
+        source_closed: bool,
+    ) -> None:
+        """Record a one-way Court Order copy into a Docket and its sync checkpoint."""
+        async with aiosqlite.connect(self.path) as database:
+            await database.execute(
+                """
+                INSERT INTO court_order_docket_merges
+                (submission_id, docket_thread_id, merged_by_user_id, merged_by_name, merged_at,
+                 last_forwarded_message_id, source_closed)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(submission_id) DO UPDATE SET
+                    docket_thread_id = excluded.docket_thread_id,
+                    merged_by_user_id = excluded.merged_by_user_id,
+                    merged_by_name = excluded.merged_by_name,
+                    merged_at = excluded.merged_at,
+                    last_forwarded_message_id = excluded.last_forwarded_message_id,
+                    source_closed = excluded.source_closed
+                """,
+                (
+                    submission_id,
+                    docket_thread_id,
+                    merged_by_user_id,
+                    merged_by_name,
+                    merged_at,
+                    last_forwarded_message_id,
+                    int(source_closed),
+                ),
+            )
+            await database.commit()
+
     @staticmethod
     def _submission_from_row(row: aiosqlite.Row) -> Submission:
         return Submission(
@@ -399,4 +721,45 @@ class SubmissionStore:
             closed_by_name=row["closed_by_name"],
             closed_at=row["closed_at"],
             closed_note=row["closed_note"],
+        )
+
+    @staticmethod
+    def _case_assignment_from_row(row: aiosqlite.Row) -> CaseAssignment:
+        return CaseAssignment(
+            submission_id=row["submission_id"],
+            assignment_type=row["assignment_type"],
+            user_id=row["user_id"],
+            user_name=row["user_name"],
+            assigned_by_user_id=row["assigned_by_user_id"],
+            assigned_by_name=row["assigned_by_name"],
+            assigned_at=row["assigned_at"],
+        )
+
+    @staticmethod
+    def _assignment_transfer_from_row(row: aiosqlite.Row) -> AssignmentTransfer:
+        return AssignmentTransfer(
+            id=row["id"],
+            submission_id=row["submission_id"],
+            assignment_type=row["assignment_type"],
+            from_user_id=row["from_user_id"],
+            from_user_name=row["from_user_name"],
+            to_user_id=row["to_user_id"],
+            to_user_name=row["to_user_name"],
+            proposed_by_user_id=row["proposed_by_user_id"],
+            proposed_by_name=row["proposed_by_name"],
+            proposed_at=row["proposed_at"],
+            status=row["status"],
+            accepted_at=row["accepted_at"],
+        )
+
+    @staticmethod
+    def _court_order_docket_merge_from_row(row: aiosqlite.Row) -> CourtOrderDocketMerge:
+        return CourtOrderDocketMerge(
+            submission_id=row["submission_id"],
+            docket_thread_id=row["docket_thread_id"],
+            merged_by_user_id=row["merged_by_user_id"],
+            merged_by_name=row["merged_by_name"],
+            merged_at=row["merged_at"],
+            last_forwarded_message_id=row["last_forwarded_message_id"],
+            source_closed=bool(row["source_closed"]),
         )

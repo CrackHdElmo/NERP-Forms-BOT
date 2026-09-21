@@ -89,6 +89,22 @@ The bot also checks the linked response Sheet automatically every 60 seconds by 
 retry command. Set `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` to a larger value (for example,
 `120`) in protected host settings when a slower polling interval is preferred.
 
+## Docket merges and case assignments
+
+An authorized administrator, Judge, or Attorney General can run
+`/merge-court-order-to-docket` inside an active off-docket Court Order ticket and provide the
+destination Docket Forum post's Discord link or ID. The bot presents an explicit choice to
+either keep the original Court Order open or, after forwarding its messages and attachments,
+post the normal permanent staff record and close the original private ticket. A retained Court
+Order can be merged again later to forward only newer ticket activity to the same Docket post.
+
+`/assign-case` supports optional Prosecutor, Judge, and Defense Attorney assignments. Each
+assignment is shown as a named member or **Unassigned** in the ticket. Eligible staff may
+self-assign; configured DOJ/PD Command and bot administrators may assign or reassign another
+eligible member. `/transfer-case-assignment` creates an acceptance-required handoff, and the
+recipient must run `/accept-case-transfer` in the same ticket before the current assignment
+changes. The permanent closure record includes the final assignments and accepted transfers.
+
 For a claimed Arrest Warrant request, a configured administrator can use
 `/generate-arrest-warrant` with the bot-issued request ID inside that request's private ticket.
 The verified requester and configured bot administrators can use it. The bot reads the submitted docket,

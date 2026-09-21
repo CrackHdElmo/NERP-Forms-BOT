@@ -20,6 +20,12 @@ from .submission_store import Submission, SubmissionStore
 
 LOGGER = logging.getLogger(__name__)
 
+CASE_ASSIGNMENT_TYPES = ("prosecutor", "judge", "defense_attorney")
+
+
+class CourtOrderMergeError(Exception):
+    """Raised when a requested Court Order-to-Docket merge cannot safely proceed."""
+
 
 class Settings(BaseSettings):
     """Runtime settings loaded from protected environment variables."""
@@ -170,6 +176,62 @@ class SetupNamesModal(discord.ui.Modal):
         )
 
 
+class CourtOrderMergeView(discord.ui.View):
+    """Give authorized staff an explicit, reversible choice after choosing a Docket post."""
+
+    def __init__(self, bot: NerpFormsBot, submission_id: int, docket_thread_id: int) -> None:
+        super().__init__(timeout=900)
+        self.bot = bot
+        self.submission_id = submission_id
+        self.docket_thread_id = docket_thread_id
+
+    async def _merge(self, interaction: discord.Interaction, *, close_source: bool) -> None:
+        if not self.bot._can_merge_court_order(interaction):
+            await interaction.response.send_message(
+                "Only a configured bot administrator, Judge, or Attorney General can merge a Court Order.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            result = await self.bot._merge_court_order_into_docket(
+                interaction,
+                submission_id=self.submission_id,
+                docket_thread_id=self.docket_thread_id,
+                close_source=close_source,
+            )
+        except discord.Forbidden:
+            LOGGER.warning("The bot lacks permission to merge Court Order %s", self.submission_id)
+            await interaction.followup.send(
+                "The bot needs permission to read the Court Order, send messages in the selected Docket post, "
+                "and, when closing, manage the private ticket. Confirm its role permissions and retry.",
+                ephemeral=True,
+            )
+            return
+        except (CourtOrderMergeError, RuntimeError, ValueError) as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            return
+        except Exception:
+            LOGGER.exception("Court Order merge failed for submission %s", self.submission_id)
+            await interaction.followup.send(
+                "The Court Order could not be merged. Check the Wispbyte console for the safe diagnostic message.",
+                ephemeral=True,
+            )
+            return
+        for child in self.children:
+            child.disabled = True
+        await interaction.edit_original_response(view=self)
+        await interaction.followup.send(result, ephemeral=True)
+
+    @discord.ui.button(label="Merge and keep Court Order open", style=discord.ButtonStyle.secondary)
+    async def keep_open(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await self._merge(interaction, close_source=False)
+
+    @discord.ui.button(label="Merge and close Court Order", style=discord.ButtonStyle.danger)
+    async def close_source(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await self._merge(interaction, close_source=True)
+
+
 class NerpFormsBot(discord.Client):
     """Minimal Discord client; workflow handlers are added in later milestones."""
 
@@ -223,6 +285,74 @@ class NerpFormsBot(discord.Client):
         return self._is_administrator(interaction) or any(
             role.id in refresh_role_ids for role in member.roles
         )
+
+    def _can_merge_court_order(self, interaction: discord.Interaction) -> bool:
+        """Use the same judicial/AG authority boundary for moving an investigative Court Order."""
+        return self._can_refresh_court_order(interaction)
+
+    def _can_manage_case_assignments(self, interaction: discord.Interaction) -> bool:
+        """Allow the configured DOJ/PD leadership groups to make a direct reassignment."""
+        member = interaction.user
+        if not isinstance(member, discord.Member):
+            return False
+        management_role_ids = self._role_ids(
+            "high_command_doj",
+            "attorney_general",
+            "district_attorneys_office",
+            "lspd_high_command",
+            "lspd_chief",
+        )
+        return self._is_administrator(interaction) or any(
+            role.id in management_role_ids for role in member.roles
+        )
+
+    def _assignment_role_ids(self, assignment_type: str) -> set[int]:
+        """Resolve the server roles eligible for each optional case assignment."""
+        groups = {
+            "prosecutor": (
+                "prosecutors",
+                "district_attorneys_office",
+                "assistant_district_attorneys",
+                "attorney_general",
+            ),
+            "judge": ("judges", "judges_office", "senior_judges"),
+            "defense_attorney": ("defense_attorneys", "chief_of_defense"),
+        }
+        return self._role_ids(*groups.get(assignment_type, ()))
+
+    def _member_can_fill_assignment(
+        self, member: discord.Member, assignment_type: str
+    ) -> bool:
+        """Avoid assigning a user to a case role they do not hold on this Discord server."""
+        eligible_role_ids = self._assignment_role_ids(assignment_type)
+        return any(role.id in eligible_role_ids for role in member.roles)
+
+    @staticmethod
+    def _assignment_label(assignment_type: str) -> str:
+        return {
+            "prosecutor": "Prosecutor",
+            "judge": "Judge",
+            "defense_attorney": "Defense Attorney",
+        }[assignment_type]
+
+    async def _case_assignment_embed(self, submission: Submission) -> discord.Embed:
+        """Show all optional case roles, explicitly distinguishing an unassigned role."""
+        current = {
+            assignment.assignment_type: assignment
+            for assignment in await self.store.get_case_assignments(submission.id)
+        }
+        embed = discord.Embed(
+            title=f"Case assignments — {submission.request_id}",
+            description="Current staff assignments for this ticket. Roles remain optional until assigned.",
+            color=discord.Color.blurple(),
+        )
+        for assignment_type in CASE_ASSIGNMENT_TYPES:
+            assignment = current.get(assignment_type)
+            value = f"<@{assignment.user_id}>" if assignment else "Unassigned"
+            embed.add_field(
+                name=self._assignment_label(assignment_type), value=value, inline=True
+            )
+        return embed
 
     def _role_ids(self, *role_groups: str) -> set[int]:
         """Resolve configured role groups while allowing test and production aliases."""
@@ -956,6 +1086,276 @@ class NerpFormsBot(discord.Client):
             )
 
         @self.tree.command(
+            name="assign-case",
+            description="Assign or reassign the prosecutor, Judge, or defense attorney for this ticket.",
+            guild=guild,
+        )
+        @app_commands.describe(
+            assignment_type="The optional role being assigned.",
+            member="The eligible server member who will hold that role.",
+        )
+        @app_commands.choices(
+            assignment_type=[
+                app_commands.Choice(name="Prosecutor", value="prosecutor"),
+                app_commands.Choice(name="Judge", value="judge"),
+                app_commands.Choice(name="Defense Attorney", value="defense_attorney"),
+            ]
+        )
+        async def assign_case(
+            interaction: discord.Interaction,
+            assignment_type: app_commands.Choice[str],
+            member: discord.Member,
+        ) -> None:
+            if not isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
+                await interaction.response.send_message(
+                    "Run this command inside a bot-managed case, Docket entry, or Court Order ticket.",
+                    ephemeral=True,
+                )
+                return
+            submission = await self.store.get_by_channel_id(interaction.channel.id)
+            if not submission or submission.status == "closed":
+                await interaction.response.send_message(
+                    "This is not an active bot-managed case or request.", ephemeral=True
+                )
+                return
+            if member.bot or not self._member_can_fill_assignment(member, assignment_type.value):
+                await interaction.response.send_message(
+                    f"{member.mention} does not hold an eligible {self._assignment_label(assignment_type.value)} role.",
+                    ephemeral=True,
+                )
+                return
+            self_assignment = interaction.user.id == member.id
+            if not self_assignment and not self._can_manage_case_assignments(interaction):
+                await interaction.response.send_message(
+                    "Only DOJ/PD Command or a configured bot administrator can assign another member. "
+                    "Eligible staff may assign themselves.",
+                    ephemeral=True,
+                )
+                return
+            if self_assignment and not self._member_can_fill_assignment(
+                interaction.user, assignment_type.value
+            ):
+                await interaction.response.send_message(
+                    "You do not hold the role you are trying to self-assign.", ephemeral=True
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            assigned_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+            actor_name = interaction.user.display_name.strip() or interaction.user.name
+            await self.store.set_case_assignment(
+                submission_id=submission.id,
+                assignment_type=assignment_type.value,
+                user_id=member.id,
+                user_name=member.display_name,
+                assigned_by_user_id=interaction.user.id,
+                assigned_by_name=actor_name,
+                assigned_at=assigned_at,
+            )
+            await interaction.channel.send(
+                f"{interaction.user.mention} assigned {member.mention} as **{self._assignment_label(assignment_type.value)}** "
+                f"for **{submission.request_id}**.",
+                embed=await self._case_assignment_embed(submission),
+            )
+            await interaction.followup.send("Assignment recorded.", ephemeral=True)
+
+        @self.tree.command(
+            name="transfer-case-assignment",
+            description="Offer your current case role to another eligible staff member for acceptance.",
+            guild=guild,
+        )
+        @app_commands.describe(
+            assignment_type="The assigned role being handed off.",
+            member="The eligible staff member who must accept this transfer.",
+        )
+        @app_commands.choices(
+            assignment_type=[
+                app_commands.Choice(name="Prosecutor", value="prosecutor"),
+                app_commands.Choice(name="Judge", value="judge"),
+                app_commands.Choice(name="Defense Attorney", value="defense_attorney"),
+            ]
+        )
+        async def transfer_case_assignment(
+            interaction: discord.Interaction,
+            assignment_type: app_commands.Choice[str],
+            member: discord.Member,
+        ) -> None:
+            if not isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
+                await interaction.response.send_message(
+                    "Run this command inside the active case or request being transferred.", ephemeral=True
+                )
+                return
+            submission = await self.store.get_by_channel_id(interaction.channel.id)
+            if not submission or submission.status == "closed":
+                await interaction.response.send_message(
+                    "This is not an active bot-managed case or request.", ephemeral=True
+                )
+                return
+            if member.bot or member.id == interaction.user.id:
+                await interaction.response.send_message(
+                    "Choose another eligible server member to receive the transfer.", ephemeral=True
+                )
+                return
+            if not self._member_can_fill_assignment(member, assignment_type.value):
+                await interaction.response.send_message(
+                    f"{member.mention} does not hold an eligible {self._assignment_label(assignment_type.value)} role.",
+                    ephemeral=True,
+                )
+                return
+            assignments = await self.store.get_case_assignments(submission.id)
+            current = next(
+                (item for item in assignments if item.assignment_type == assignment_type.value), None
+            )
+            if not current:
+                await interaction.response.send_message(
+                    f"There is no assigned {self._assignment_label(assignment_type.value)} to transfer yet.",
+                    ephemeral=True,
+                )
+                return
+            if current.user_id != interaction.user.id and not self._can_manage_case_assignments(interaction):
+                await interaction.response.send_message(
+                    "Only the currently assigned staff member, DOJ/PD Command, or a configured bot administrator can offer this transfer.",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            actor_name = interaction.user.display_name.strip() or interaction.user.name
+            await self.store.propose_assignment_transfer(
+                submission_id=submission.id,
+                assignment_type=assignment_type.value,
+                from_user_id=current.user_id,
+                from_user_name=current.user_name,
+                to_user_id=member.id,
+                to_user_name=member.display_name,
+                proposed_by_user_id=interaction.user.id,
+                proposed_by_name=actor_name,
+                proposed_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
+            )
+            await interaction.channel.send(
+                f"{member.mention}, {interaction.user.mention} offered you the **{self._assignment_label(assignment_type.value)}** "
+                f"assignment for **{submission.request_id}**. Run `/accept-case-transfer` in this ticket to accept it.",
+            )
+            await interaction.followup.send(
+                "Transfer offer recorded. The assignment will not change until the recipient accepts it.",
+                ephemeral=True,
+            )
+
+        @self.tree.command(
+            name="accept-case-transfer",
+            description="Accept a pending prosecutor, Judge, or defense-attorney transfer in this ticket.",
+            guild=guild,
+        )
+        @app_commands.describe(assignment_type="The pending role transfer you are accepting.")
+        @app_commands.choices(
+            assignment_type=[
+                app_commands.Choice(name="Prosecutor", value="prosecutor"),
+                app_commands.Choice(name="Judge", value="judge"),
+                app_commands.Choice(name="Defense Attorney", value="defense_attorney"),
+            ]
+        )
+        async def accept_case_transfer(
+            interaction: discord.Interaction,
+            assignment_type: app_commands.Choice[str],
+        ) -> None:
+            if not isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
+                await interaction.response.send_message(
+                    "Run this command inside the ticket containing your transfer offer.", ephemeral=True
+                )
+                return
+            if not isinstance(interaction.user, discord.Member) or not self._member_can_fill_assignment(
+                interaction.user, assignment_type.value
+            ):
+                await interaction.response.send_message(
+                    "You do not hold the role required to accept that transfer.", ephemeral=True
+                )
+                return
+            submission = await self.store.get_by_channel_id(interaction.channel.id)
+            if not submission or submission.status == "closed":
+                await interaction.response.send_message(
+                    "This is not an active bot-managed case or request.", ephemeral=True
+                )
+                return
+            transfer = await self.store.get_pending_assignment_transfer(
+                submission_id=submission.id,
+                assignment_type=assignment_type.value,
+                recipient_user_id=interaction.user.id,
+            )
+            if not transfer:
+                await interaction.response.send_message(
+                    "You do not have a pending transfer for that role in this ticket.", ephemeral=True
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            accepted = await self.store.accept_assignment_transfer(
+                transfer,
+                accepted_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
+            )
+            if not accepted:
+                await interaction.followup.send(
+                    "That transfer is no longer pending. No assignment was changed.", ephemeral=True
+                )
+                return
+            await interaction.channel.send(
+                f"{interaction.user.mention} accepted the **{self._assignment_label(assignment_type.value)}** "
+                f"transfer for **{submission.request_id}**.",
+                embed=await self._case_assignment_embed(submission),
+            )
+            await interaction.followup.send("Transfer accepted and assignment updated.", ephemeral=True)
+
+        @self.tree.command(
+            name="merge-court-order-to-docket",
+            description="Copy an off-docket Court Order into a selected Docket Forum post.",
+            guild=guild,
+        )
+        @app_commands.describe(
+            docket_entry="The destination Docket Forum post URL or its Discord ID."
+        )
+        async def merge_court_order_to_docket(
+            interaction: discord.Interaction,
+            docket_entry: str,
+        ) -> None:
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.response.send_message(
+                    "Run this command inside the off-docket Court Order ticket you want to merge.",
+                    ephemeral=True,
+                )
+                return
+            if not self._can_merge_court_order(interaction):
+                await interaction.response.send_message(
+                    "Only a configured bot administrator, Judge, or Attorney General can merge a Court Order.",
+                    ephemeral=True,
+                )
+                return
+            submission = await self.store.get_by_channel_id(interaction.channel.id)
+            if not submission or submission.workflow != "court_order" or submission.status == "closed":
+                await interaction.response.send_message(
+                    "This is not an active Court Order ticket.", ephemeral=True
+                )
+                return
+            off_docket_category = await self._resolve_category(
+                "off_docket_tickets_category", "off_docket_tickets"
+            )
+            if interaction.channel.category_id != off_docket_category.id:
+                await interaction.response.send_message(
+                    "Only an off-docket Court Order ticket can be merged into a Docket entry.",
+                    ephemeral=True,
+                )
+                return
+            try:
+                docket_thread = await self._resolve_docket_thread(docket_entry)
+            except ValueError as error:
+                await interaction.response.send_message(str(error), ephemeral=True)
+                return
+            await interaction.response.send_message(
+                f"Ready to merge **{submission.request_id}** into {docket_thread.mention}. Choose whether "
+                "the original private Court Order remains open or is formally closed after the copy succeeds.",
+                view=CourtOrderMergeView(self, submission.id, docket_thread.id),
+                ephemeral=True,
+            )
+
+        @self.tree.command(
             name="close-ticket",
             description="Close this NERP request and add a staff-only case record.",
             guild=guild,
@@ -1003,7 +1403,7 @@ class NerpFormsBot(discord.Client):
             closed_at = datetime.now(UTC).replace(microsecond=0).isoformat()
             try:
                 records_channel = await self._get_or_create_case_records_channel()
-                for record_embed in self._case_record_embeds(
+                for record_embed in await self._case_record_embeds(
                     submission=submission,
                     closed_by=interaction.user,
                     closed_at=closed_at,
@@ -1895,6 +2295,155 @@ class NerpFormsBot(discord.Client):
         )
         return workspace, rows
 
+    async def _resolve_docket_thread(self, reference: str) -> discord.Thread:
+        """Resolve only a Forum post in the configured Docket Forum from a pasted URL or ID."""
+        match = re.search(r"(\d{17,20})/?$", reference.strip())
+        if not match:
+            raise ValueError(
+                "Provide the destination Docket Forum post's full Discord link or its numeric Discord ID."
+            )
+        guild = self.get_guild(self.environment.guild.id)
+        if not guild:
+            raise ValueError("The configured Discord server is not currently available.")
+        thread_id = int(match.group(1))
+        target = guild.get_thread(thread_id)
+        if target is None:
+            try:
+                fetched = await guild.fetch_channel(thread_id)
+            except discord.NotFound as error:
+                raise ValueError("That Docket Forum post could not be found.") from error
+            target = fetched if isinstance(fetched, discord.Thread) else None
+        expected_parent_id = self.environment.channels.get("docket_forum")
+        if not isinstance(target, discord.Thread) or target.parent_id != expected_parent_id:
+            raise ValueError("The selected destination must be an existing post in the configured Docket Forum.")
+        if target.archived or target.locked:
+            raise ValueError("The selected Docket post is archived or locked and cannot receive a Court Order.")
+        return target
+
+    async def _merge_court_order_into_docket(
+        self,
+        interaction: discord.Interaction,
+        *,
+        submission_id: int,
+        docket_thread_id: int,
+        close_source: bool,
+    ) -> str:
+        """Forward an auditable Court Order snapshot into a Docket post, optionally closing the source."""
+        submission = await self.store.get_by_id(submission_id)
+        if not submission or submission.workflow != "court_order" or submission.status == "closed":
+            raise RuntimeError("This Court Order is no longer an active request and cannot be merged.")
+        guild = self.get_guild(self.environment.guild.id)
+        source = guild.get_channel(submission.discord_channel_id or 0) if guild else None
+        if not isinstance(source, discord.TextChannel):
+            raise CourtOrderMergeError(
+                "The original private Court Order ticket is no longer available to merge."
+            )
+        docket_thread = await self._resolve_docket_thread(str(docket_thread_id))
+        previous_merge = await self.store.get_court_order_docket_merge(submission.id)
+        if previous_merge and previous_merge.docket_thread_id != docket_thread.id:
+            raise RuntimeError(
+                "This Court Order was already merged into a different Docket post. "
+                "Use that original Docket post to preserve one continuous case record."
+            )
+
+        actor_name = interaction.user.display_name.strip() or interaction.user.name
+        merged_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+        last_forwarded_id = previous_merge.last_forwarded_message_id if previous_merge else None
+        if previous_merge:
+            header = "Court Order update merged into Docket"
+            description = (
+                f"Additional content from **{submission.request_id}** was forwarded from its private "
+                f"Court Order ticket by {interaction.user.mention}."
+            )
+        else:
+            header = "Court Order merged into Docket"
+            description = (
+                f"**{submission.request_id}** was copied from its private investigative Court Order ticket "
+                f"by {interaction.user.mention}. Forwarded messages retain the original Discord authorship "
+                "and attachments."
+            )
+        await docket_thread.send(
+            embed=discord.Embed(
+                title=header,
+                description=description,
+                color=discord.Color.gold(),
+                timestamp=datetime.fromisoformat(merged_at),
+            )
+        )
+
+        forwarded_count = 0
+        newest_message_id = last_forwarded_id
+        history_kwargs: dict[str, object] = {"limit": None, "oldest_first": True}
+        if last_forwarded_id:
+            history_kwargs["after"] = discord.Object(id=last_forwarded_id)
+        async for message in source.history(**history_kwargs):
+            await message.forward(docket_thread, fail_if_not_exists=False)
+            forwarded_count += 1
+            newest_message_id = message.id
+
+        await self.store.record_court_order_docket_merge(
+            submission_id=submission.id,
+            docket_thread_id=docket_thread.id,
+            merged_by_user_id=interaction.user.id,
+            merged_by_name=actor_name,
+            merged_at=merged_at,
+            last_forwarded_message_id=newest_message_id,
+            source_closed=False,
+        )
+        if not close_source:
+            source_notice = await source.send(
+                f"{interaction.user.mention} merged **{submission.request_id}** into {docket_thread.mention}. "
+                "This Court Order remains open; a later merge can forward additional ticket activity."
+            )
+            await self.store.record_court_order_docket_merge(
+                submission_id=submission.id,
+                docket_thread_id=docket_thread.id,
+                merged_by_user_id=interaction.user.id,
+                merged_by_name=actor_name,
+                merged_at=merged_at,
+                last_forwarded_message_id=source_notice.id,
+                source_closed=False,
+            )
+            return (
+                f"Merged **{submission.request_id}** into {docket_thread.mention} and forwarded "
+                f"{forwarded_count} message(s). The original Court Order remains open."
+            )
+
+        closure_note = f"Merged into Docket {docket_thread.mention} by {interaction.user.mention}."
+        records_channel = await self._get_or_create_case_records_channel()
+        for record_embed in await self._case_record_embeds(
+            submission=submission,
+            closed_by=interaction.user,
+            closed_at=merged_at,
+            closure_note=closure_note,
+            source_deleted=True,
+        ):
+            await records_channel.send(embed=record_embed)
+        recorded = await self.store.mark_closed(
+            submission_id=submission.id,
+            closer_user_id=interaction.user.id,
+            closer_name=actor_name,
+            closed_at=merged_at,
+            closed_note=closure_note,
+        )
+        if not recorded:
+            raise RuntimeError("This Court Order was already closed before the merge could finish.")
+        await self.store.record_court_order_docket_merge(
+            submission_id=submission.id,
+            docket_thread_id=docket_thread.id,
+            merged_by_user_id=interaction.user.id,
+            merged_by_name=actor_name,
+            merged_at=merged_at,
+            last_forwarded_message_id=newest_message_id,
+            source_closed=True,
+        )
+        await self._finalize_request_channel(source, submission)
+        return (
+            f"Merged **{submission.request_id}** into {docket_thread.mention}, forwarded "
+            f"{forwarded_count} message(s), posted the permanent staff record in {records_channel.mention}, "
+            "and closed the original Court Order ticket."
+        )
+
     async def _get_or_create_case_records_channel(self) -> discord.TextChannel:
         """Lazily create the permanent DOJ/PD-only records channel on first closure."""
         guild = self.get_guild(self.environment.guild.id)
@@ -1947,7 +2496,7 @@ class NerpFormsBot(discord.Client):
         await self.store.set_resource_channel_id("doj_case_records", channel.id)
         return channel
 
-    def _case_record_embeds(
+    async def _case_record_embeds(
         self,
         *,
         submission: Submission,
@@ -1956,7 +2505,7 @@ class NerpFormsBot(discord.Client):
         closure_note: str | None,
         source_deleted: bool,
     ) -> list[discord.Embed]:
-        """Create staff-only records, including all Form-submitted evidence links."""
+        """Create staff-only records, including Form evidence and assignment audit context."""
         classified_answer = self._answer_prefix(
             submission.payload,
             'Has the Case or it\'s evidence been designated "Classified"',
@@ -2027,6 +2576,30 @@ class NerpFormsBot(discord.Client):
             )
         if subject_lines:
             embed.add_field(name="Subjects", value="\n".join(subject_lines)[:1024], inline=False)
+        assignments = await self.store.get_case_assignments(submission.id)
+        assignment_values = {item.assignment_type: item for item in assignments}
+        assignment_lines = []
+        for assignment_type in CASE_ASSIGNMENT_TYPES:
+            assignment = assignment_values.get(assignment_type)
+            assignment_lines.append(
+                f"**{self._assignment_label(assignment_type)}:** "
+                f"<@{assignment.user_id}>" if assignment else
+                f"**{self._assignment_label(assignment_type)}:** Unassigned"
+            )
+        embed.add_field(name="Case assignments", value="\n".join(assignment_lines), inline=False)
+        transfers = await self.store.get_assignment_transfers(submission.id)
+        accepted_transfers = [transfer for transfer in transfers if transfer.status == "accepted"]
+        if accepted_transfers:
+            embed.add_field(
+                name="Accepted assignment transfers",
+                value="\n".join(
+                    f"{self._assignment_label(transfer.assignment_type)}: "
+                    f"<@{transfer.from_user_id}> → <@{transfer.to_user_id}> "
+                    f"(accepted {transfer.accepted_at})"
+                    for transfer in accepted_transfers
+                )[:1024],
+                inline=False,
+            )
         if closure_note:
             embed.add_field(name="Closure note", value=closure_note, inline=False)
         if source_deleted:
@@ -2246,6 +2819,7 @@ class NerpFormsBot(discord.Client):
             if value:
                 embed.add_field(name=label, value=value[:1024], inline=False)
         await channel.send(embed=embed)
+        await channel.send(embed=await self._case_assignment_embed(submission))
         if not self._has_dedicated_court_order_workflow(submission):
             await channel.send(
                 f"**{self._request_type(submission) or 'This Court Order type'}** was received and "
