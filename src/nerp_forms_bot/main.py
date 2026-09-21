@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -22,6 +23,8 @@ LOGGER = logging.getLogger(__name__)
 
 CASE_ASSIGNMENT_TYPES = ("prosecutor", "judge", "defense_attorney", "pd_officer")
 CASE_ASSIGNMENT_SLOTS = (1, 2)
+SERVICE_DESK_CONFIG_KEY = "service_desk_embed"
+SERVICE_DESK_MESSAGE_KEY = "service_desk_embed_message_id"
 
 
 class CourtOrderMergeError(Exception):
@@ -470,6 +473,188 @@ class NerpFormsBot(discord.Client):
                     return channel
         return None
 
+    @staticmethod
+    def _default_service_desk_config() -> dict[str, object]:
+        return {
+            "title": "NERP - Case Management Service Desk",
+            "description": (
+                "Your central directory for case-management forms, court services, "
+                "standard operating procedures, and related community resources."
+            ),
+            "image_url": None,
+            "form_links": [None, None, None, None],
+            "external_links": [None, None, None, None],
+        }
+
+    async def _load_service_desk_config(self) -> dict[str, object]:
+        """Load the editable Service Desk directory, repairing malformed saved values safely."""
+        config = self._default_service_desk_config()
+        raw = await self.store.get_bot_setting(SERVICE_DESK_CONFIG_KEY)
+        if not raw:
+            return config
+        try:
+            saved = json.loads(raw)
+        except json.JSONDecodeError:
+            LOGGER.warning("Ignoring malformed saved Service Desk configuration")
+            return config
+        if not isinstance(saved, dict):
+            return config
+        for key, maximum in (("title", 256), ("description", 4096), ("image_url", 2048)):
+            value = saved.get(key)
+            if value is None and key in {"description", "image_url"}:
+                config[key] = None
+                continue
+            if isinstance(value, str) and len(value.strip()) <= maximum:
+                config[key] = value.strip() or None
+        for key in ("form_links", "external_links"):
+            saved_links = saved.get(key)
+            if not isinstance(saved_links, list):
+                continue
+            links: list[dict[str, str] | None] = [None, None, None, None]
+            for index, item in enumerate(saved_links[:4]):
+                if (
+                    isinstance(item, dict)
+                    and isinstance(item.get("label"), str)
+                    and isinstance(item.get("url"), str)
+                    and item["label"].strip()
+                    and item["url"].strip()
+                ):
+                    links[index] = {"label": item["label"].strip()[:80], "url": item["url"].strip()[:2048]}
+            config[key] = links
+        return config
+
+    async def _save_service_desk_config(self, config: dict[str, object]) -> None:
+        await self.store.set_bot_setting(SERVICE_DESK_CONFIG_KEY, json.dumps(config, sort_keys=True))
+
+    async def _get_service_desk_channel(self) -> discord.TextChannel:
+        guild = self.get_guild(self.environment.guild.id)
+        if not guild:
+            raise RuntimeError("The configured Discord server is not currently available.")
+        channel = await self._registered_or_configured_channel(
+            guild, "service_desk_channel", self.environment.channels.get("service_desk")
+        )
+        if not isinstance(channel, discord.TextChannel):
+            raise TypeError("The configured #service-desk channel could not be found.")
+        return channel
+
+    @staticmethod
+    def _service_desk_embed(config: dict[str, object]) -> discord.Embed:
+        title = config.get("title") or "NERP - Case Management Service Desk"
+        description = config.get("description") or "Case-management resources and information."
+        embed = discord.Embed(title=str(title), description=str(description), color=discord.Color.blurple())
+        for key, heading, empty_text in (
+            ("form_links", "Case & Court Forms", "No form links have been added yet."),
+            ("external_links", "Policies & External Resources", "No external links have been added yet."),
+        ):
+            links = config.get(key)
+            if not isinstance(links, list):
+                links = []
+            values = [
+                f"{index}. [{item['label']}]({item['url']})"
+                for index, item in enumerate(links, start=1)
+                if isinstance(item, dict) and item.get("label") and item.get("url")
+            ]
+            embed.add_field(name=heading, value="\n".join(values) or empty_text, inline=False)
+        image_url = config.get("image_url")
+        if isinstance(image_url, str) and image_url:
+            embed.set_image(url=image_url)
+        embed.set_footer(text="Managed by NERP - Case Management")
+        return embed
+
+    async def _publish_service_desk(self, config: dict[str, object]) -> tuple[discord.TextChannel, bool]:
+        """Create or update the one bot-owned Service Desk embed without duplicate posts."""
+        channel = await self._get_service_desk_channel()
+        embed = self._service_desk_embed(config)
+        raw_message_id = await self.store.get_bot_setting(SERVICE_DESK_MESSAGE_KEY)
+        if raw_message_id and raw_message_id.isdigit():
+            try:
+                message = await channel.fetch_message(int(raw_message_id))
+                if self.user and message.author.id == self.user.id:
+                    await message.edit(embed=embed)
+                    await self._save_service_desk_config(config)
+                    return channel, False
+            except (discord.NotFound, discord.Forbidden):
+                pass
+        message = await channel.send(embed=embed)
+        await self.store.set_bot_setting(SERVICE_DESK_MESSAGE_KEY, str(message.id))
+        await self._save_service_desk_config(config)
+        return channel, True
+
+    async def _adopt_service_desk_message(self, message_link: str) -> None:
+        """Select one existing bot-authored Service Desk message for future in-place updates."""
+        match = re.fullmatch(
+            r"https://(?:ptb\.|canary\.)?discord(?:app)?\.com/channels/\d+/(\d+)/(\d+)/?",
+            message_link.strip(),
+        )
+        if not match:
+            raise ValueError("Provide the full Discord message link for the existing Service Desk post.")
+        channel = await self._get_service_desk_channel()
+        channel_id, message_id = (int(value) for value in match.groups())
+        if channel.id != channel_id:
+            raise ValueError("That message is not located in the configured #service-desk channel.")
+        try:
+            message = await channel.fetch_message(message_id)
+        except discord.NotFound as error:
+            raise ValueError("That Service Desk message could not be found.") from error
+        if not self.user or message.author.id != self.user.id:
+            raise ValueError(
+                "The bot can only adopt a message it authored. It will create and maintain its own directory post instead."
+            )
+        await self.store.set_bot_setting(SERVICE_DESK_MESSAGE_KEY, str(message.id))
+
+    async def _set_service_desk_link(
+        self,
+        interaction: discord.Interaction,
+        *,
+        key: str,
+        slot: int,
+        label: str,
+        url: str,
+    ) -> None:
+        """Validate one directory link, persist it, and republish the managed embed."""
+        if not self._is_administrator(interaction):
+            await interaction.response.send_message(
+                "Only a configured bot administrator can update the Service Desk.", ephemeral=True
+            )
+            return
+        if not label.strip() or len(label.strip()) > 80:
+            await interaction.response.send_message(
+                "The visible link label must contain between 1 and 80 characters.", ephemeral=True
+            )
+            return
+        if not re.fullmatch(r"https://\S{1,2040}", url.strip()):
+            await interaction.response.send_message(
+                "Provide a direct HTTPS URL for the Service Desk link.", ephemeral=True
+            )
+            return
+        config = await self._load_service_desk_config()
+        links = config[key]
+        assert isinstance(links, list)
+        links[slot - 1] = {"label": label.strip(), "url": url.strip()}
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            channel, created = await self._publish_service_desk(config)
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "The bot needs permission to view #service-desk, read its message history, and send/edit messages there.",
+                ephemeral=True,
+            )
+            return
+        except (RuntimeError, TypeError) as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            return
+        except Exception:
+            LOGGER.exception("Service Desk link update failed")
+            await interaction.followup.send(
+                "The Service Desk embed could not be updated. Check the Wispbyte console for the safe diagnostic message.",
+                ephemeral=True,
+            )
+            return
+        action = "Created" if created else "Updated"
+        await interaction.followup.send(
+            f"{action} the managed Service Desk embed in {channel.mention}.", ephemeral=True
+        )
+
     async def _resolve_category(self, resource_key: str, configured_key: str) -> discord.CategoryChannel:
         guild = self.get_guild(self.environment.guild.id)
         configured_id = self.environment.categories.get(configured_key)
@@ -745,6 +930,209 @@ class NerpFormsBot(discord.Client):
                 "Choose the workflow resources you want the bot to set up. This preview is private; "
                 "nothing will be created until you confirm the plan.",
                 view=SetupPresetView(self),
+                ephemeral=True,
+            )
+
+        service_desk = app_commands.Group(
+            name="service-desk",
+            description="Build and maintain the #service-desk directory embed.",
+        )
+        self.tree.add_command(service_desk, guild=guild)
+
+        async def publish_service_desk_update(
+            interaction: discord.Interaction, config: dict[str, object]
+        ) -> None:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                channel, created = await self._publish_service_desk(config)
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    "The bot needs permission to view #service-desk, read its message history, and send/edit messages there.",
+                    ephemeral=True,
+                )
+                return
+            except (RuntimeError, TypeError) as error:
+                await interaction.followup.send(str(error), ephemeral=True)
+                return
+            except Exception:
+                LOGGER.exception("Service Desk update failed")
+                await interaction.followup.send(
+                    "The Service Desk embed could not be updated. Check the Wispbyte console for the safe diagnostic message.",
+                    ephemeral=True,
+                )
+                return
+            action = "Created" if created else "Updated"
+            await interaction.followup.send(
+                f"{action} the managed Service Desk embed in {channel.mention}.", ephemeral=True
+            )
+
+        @service_desk.command(
+            name="edit",
+            description="Set the Service Desk header, optional directory text, or image.",
+        )
+        @app_commands.describe(
+            title="New embed header title; leave blank to keep the current title.",
+            description="Optional directory introduction; leave blank to keep the current text.",
+            image_url="Direct HTTPS image URL; leave blank to keep the current image.",
+        )
+        async def service_desk_edit(
+            interaction: discord.Interaction,
+            title: str | None = None,
+            description: str | None = None,
+            image_url: str | None = None,
+        ) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only a configured bot administrator can update the Service Desk.", ephemeral=True
+                )
+                return
+            if not any((title, description, image_url)):
+                await interaction.response.send_message(
+                    "Provide at least one item to update: title, description, or image URL.", ephemeral=True
+                )
+                return
+            if title is not None and (not title.strip() or len(title.strip()) > 256):
+                await interaction.response.send_message(
+                    "The Service Desk title must contain between 1 and 256 characters.", ephemeral=True
+                )
+                return
+            if description is not None and (not description.strip() or len(description.strip()) > 4096):
+                await interaction.response.send_message(
+                    "The directory introduction must contain between 1 and 4,096 characters.", ephemeral=True
+                )
+                return
+            if image_url is not None and not re.fullmatch(r"https://\S{1,2040}", image_url.strip()):
+                await interaction.response.send_message(
+                    "Provide a direct HTTPS image URL, or use `/service-desk clear target:image` to remove the image.",
+                    ephemeral=True,
+                )
+                return
+            config = await self._load_service_desk_config()
+            if title is not None:
+                config["title"] = title.strip()
+            if description is not None:
+                config["description"] = description.strip()
+            if image_url is not None:
+                config["image_url"] = image_url.strip()
+            await publish_service_desk_update(interaction, config)
+
+        @service_desk.command(
+            name="form-link",
+            description="Add or replace one of four case-management form links.",
+        )
+        @app_commands.describe(slot="Which form-link position to change.", label="Visible link label.", url="Direct HTTPS form URL.")
+        @app_commands.choices(slot=[app_commands.Choice(name=str(index), value=index) for index in range(1, 5)])
+        async def service_desk_form_link(
+            interaction: discord.Interaction,
+            slot: app_commands.Choice[int],
+            label: str,
+            url: str,
+        ) -> None:
+            await self._set_service_desk_link(
+                interaction, key="form_links", slot=slot.value, label=label, url=url
+            )
+
+        @service_desk.command(
+            name="external-link",
+            description="Add or replace one of four SOP or external-resource links.",
+        )
+        @app_commands.describe(slot="Which external-link position to change.", label="Visible link label.", url="Direct HTTPS URL.")
+        @app_commands.choices(slot=[app_commands.Choice(name=str(index), value=index) for index in range(1, 5)])
+        async def service_desk_external_link(
+            interaction: discord.Interaction,
+            slot: app_commands.Choice[int],
+            label: str,
+            url: str,
+        ) -> None:
+            await self._set_service_desk_link(
+                interaction, key="external_links", slot=slot.value, label=label, url=url
+            )
+
+        @service_desk.command(
+            name="remove-link",
+            description="Remove one configured Service Desk link.",
+        )
+        @app_commands.describe(link_type="Whether this is a form or external resource.", slot="Which link position to remove.")
+        @app_commands.choices(
+            link_type=[
+                app_commands.Choice(name="Case-management form", value="form_links"),
+                app_commands.Choice(name="SOP or external resource", value="external_links"),
+            ],
+            slot=[app_commands.Choice(name=str(index), value=index) for index in range(1, 5)],
+        )
+        async def service_desk_remove_link(
+            interaction: discord.Interaction,
+            link_type: app_commands.Choice[str],
+            slot: app_commands.Choice[int],
+        ) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only a configured bot administrator can update the Service Desk.", ephemeral=True
+                )
+                return
+            config = await self._load_service_desk_config()
+            links = config[link_type.value]
+            assert isinstance(links, list)
+            links[slot.value - 1] = None
+            await publish_service_desk_update(interaction, config)
+
+        @service_desk.command(name="clear", description="Remove the Service Desk image or directory introduction.")
+        @app_commands.describe(target="The portion of the Service Desk embed to remove.")
+        @app_commands.choices(
+            target=[
+                app_commands.Choice(name="Image", value="image_url"),
+                app_commands.Choice(name="Directory introduction", value="description"),
+            ]
+        )
+        async def service_desk_clear(
+            interaction: discord.Interaction, target: app_commands.Choice[str]
+        ) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only a configured bot administrator can update the Service Desk.", ephemeral=True
+                )
+                return
+            config = await self._load_service_desk_config()
+            config[target.value] = None
+            await publish_service_desk_update(interaction, config)
+
+        @service_desk.command(name="preview", description="View the current Service Desk embed privately.")
+        async def service_desk_preview(interaction: discord.Interaction) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only a configured bot administrator can view the Service Desk configuration.", ephemeral=True
+                )
+                return
+            await interaction.response.send_message(
+                embed=self._service_desk_embed(await self._load_service_desk_config()), ephemeral=True
+            )
+
+        @service_desk.command(
+            name="adopt",
+            description="Use an existing bot-authored Service Desk post for future in-place updates.",
+        )
+        @app_commands.describe(message_link="Full Discord message link for the bot-authored Service Desk embed.")
+        async def service_desk_adopt(interaction: discord.Interaction, message_link: str) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only a configured bot administrator can update the Service Desk.", ephemeral=True
+                )
+                return
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                await self._adopt_service_desk_message(message_link)
+                channel, _ = await self._publish_service_desk(await self._load_service_desk_config())
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    "The bot needs permission to view #service-desk, read its message history, and send/edit messages there.",
+                    ephemeral=True,
+                )
+                return
+            except (RuntimeError, TypeError, ValueError) as error:
+                await interaction.followup.send(str(error), ephemeral=True)
+                return
+            await interaction.followup.send(
+                f"The existing managed Service Desk post in {channel.mention} is now configured for in-place updates.",
                 ephemeral=True,
             )
 

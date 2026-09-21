@@ -52,6 +52,12 @@ Docket Forum, and staff-only case records), the Off-Docket Court Orders category
 Requests category, or the Corporate Office/Business Licensing Forum. Existing matching bot
 resources are reused rather than duplicated, and their IDs are stored in the bot database so
 runtime workflows can use resources created through Discord without editing GitHub files.
+`/service-desk` is an administrator-only command group for maintaining one durable, bot-owned
+directory embed in `#service-desk`. It can update the header, directory introduction, and image;
+maintain up to four case/form links and four SOP or external-resource links; remove individual
+links; privately preview the directory; and adopt a prior bot-authored Service Desk post for
+future in-place updates. Every change edits the same managed post rather than creating duplicate
+directory messages.
 `/google-workspace-status` is restricted to configured bot administrators; it verifies
 the protected Google credential and creates (or finds) the test request tracker in the
 shared Drive folder. `/court-order-sync` imports new Case Management System response rows. Court

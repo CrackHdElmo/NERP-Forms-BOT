@@ -65,6 +65,16 @@ def test_docket_submission_uses_its_own_identifier_and_review_status(tmp_path) -
     assert saved.status == "pending_review"
 
 
+def test_non_secret_bot_settings_persist_for_service_desk_configuration(tmp_path) -> None:
+    async def exercise() -> str | None:
+        store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
+        await store.initialize()
+        await store.set_bot_setting("service_desk_embed", '{"title": "Case Services"}')
+        return await store.get_bot_setting("service_desk_embed")
+
+    assert asyncio.run(exercise()) == '{"title": "Case Services"}'
+
+
 def test_uncreated_failed_submission_can_be_requeued_without_new_request_id(tmp_path) -> None:
     async def exercise() -> tuple[bool, object]:
         store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")

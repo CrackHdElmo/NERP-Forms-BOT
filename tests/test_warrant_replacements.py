@@ -337,3 +337,22 @@ def test_setup_plan_uses_safe_resource_names_without_changing_category_case() ->
     assert plan.names["service_desk_channel"] == "service-desk"
     assert plan.names["docket_forum_channel"] == "active-dockets"
     assert plan.names["doj_case_records"] == "doj-case-records"
+
+
+def test_service_desk_embed_uses_configured_title_image_and_link_sections() -> None:
+    embed = _bot()._service_desk_embed(
+        {
+            "title": "Court & Case Services",
+            "description": "Start here.",
+            "image_url": "https://example.test/banner.png",
+            "form_links": [{"label": "Case Management Form", "url": "https://example.test/form"}],
+            "external_links": [{"label": "Court SOP", "url": "https://example.test/sop"}],
+        }
+    )
+
+    assert embed.title == "Court & Case Services"
+    assert embed.image.url == "https://example.test/banner.png"
+    assert embed.fields[0].name == "Case & Court Forms"
+    assert "Case Management Form" in embed.fields[0].value
+    assert embed.fields[1].name == "Policies & External Resources"
+    assert "Court SOP" in embed.fields[1].value

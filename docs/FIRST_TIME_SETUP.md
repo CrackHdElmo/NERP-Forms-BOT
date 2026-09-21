@@ -165,6 +165,26 @@ private text channels under Off-Docket Requests. A Forum post cannot be made
 visible to one individual only, so it is not suitable for confidential ticket
 access.
 
+### Configure the Service Desk directory
+
+After `#service-desk` exists, a configured bot administrator can build its one-stop directory
+without editing code or manually managing bot messages. The `/service-desk` command group keeps
+one bot-owned embed current in that channel:
+
+| Command | Use |
+| --- | --- |
+| `/service-desk edit` | Set the embed header title, optional introductory text, or direct HTTPS image URL. |
+| `/service-desk form-link` | Add or replace one of four case-management form links. |
+| `/service-desk external-link` | Add or replace one of four SOP, policy, or external Discord/community links. |
+| `/service-desk remove-link` | Remove one selected form or external link slot. |
+| `/service-desk clear` | Remove the image or introductory text. |
+| `/service-desk preview` | Review the planned directory embed privately before sharing it. |
+| `/service-desk adopt` | Point the bot at an earlier bot-authored Service Desk message using its normal Discord message link. |
+
+Each edit updates the same managed embed immediately. On first use the bot creates that embed.
+The bot cannot edit a message authored by a human or another app; leave that message in place or
+remove it manually, then let this workflow create and maintain its own directory post.
+
 If the wizard reports a permission issue, check the bot role's **Manage
 Channels**, **Manage Roles**, and **Manage Threads** permissions and its
 position in the Discord role list, then retry.
@@ -402,6 +422,9 @@ environment when old Sheet rows must not create a flood of tickets.
 | Command | Who can use it | Purpose |
 | --- | --- | --- |
 | `/setup-workflow` | Server administrator | Guided creation/registration of base Discord resources |
+| `/service-desk edit` | Configured bot administrator | Updates the managed Service Desk header, directory text, or image in place |
+| `/service-desk form-link` / `/service-desk external-link` | Configured bot administrator | Maintains up to four form links and four SOP/external links in the managed Service Desk embed |
+| `/service-desk remove-link` / `/service-desk clear` / `/service-desk preview` / `/service-desk adopt` | Configured bot administrator | Removes selected directory content, previews it privately, or selects an existing bot-authored Service Desk post for in-place updates |
 | `/bot-status` | Server members | Confirms active bot/environment connection |
 | `/google-workspace-status` | Configured bot administrator | Verifies protected Google setup and tracker access |
 | `/court-order-sync` | Configured bot administrator | Immediately import unprocessed Form responses |

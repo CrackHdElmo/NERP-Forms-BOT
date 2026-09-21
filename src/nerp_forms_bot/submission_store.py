@@ -168,6 +168,14 @@ class SubmissionStore:
                 )
                 """
             )
+            await database.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bot_settings (
+                    setting_key TEXT PRIMARY KEY,
+                    setting_value TEXT NOT NULL
+                )
+                """
+            )
             await self._add_missing_columns(database)
             await self._migrate_case_assignment_slots(database)
             await database.commit()
@@ -531,6 +539,27 @@ class SubmissionStore:
                 ON CONFLICT(resource_key) DO UPDATE SET discord_channel_id = excluded.discord_channel_id
                 """,
                 (resource_key, channel_id),
+            )
+            await database.commit()
+
+    async def get_bot_setting(self, setting_key: str) -> str | None:
+        """Return a durable, non-secret bot setting by key."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute(
+                "SELECT setting_value FROM bot_settings WHERE setting_key = ?", (setting_key,)
+            )
+            row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def set_bot_setting(self, setting_key: str, setting_value: str) -> None:
+        """Store a durable, non-secret bot setting by key."""
+        async with aiosqlite.connect(self.path) as database:
+            await database.execute(
+                """
+                INSERT INTO bot_settings (setting_key, setting_value) VALUES (?, ?)
+                ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value
+                """,
+                (setting_key, setting_value),
             )
             await database.commit()
 
