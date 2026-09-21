@@ -2126,12 +2126,11 @@ class NerpFormsBot(discord.Client):
             if value:
                 embed.add_field(name=label, value=value[:1024], inline=False)
         await channel.send(embed=embed)
-        if not self._is_arrest_warrant(submission):
+        if not self._has_dedicated_court_order_workflow(submission):
             await channel.send(
                 f"**{self._request_type(submission) or 'This Court Order type'}** was received and "
                 "recorded in this private ticket. Its dedicated document-generation and judicial "
-                "commands are not configured yet; only the Arrest Warrant workflow is automated "
-                "at this time."
+                "commands are not configured yet."
             )
         for number, details in enumerate(self._court_order_subject_details(submission.payload), start=1):
             for part, chunk in enumerate(self._discord_text_chunks(details), start=1):
@@ -2331,6 +2330,10 @@ class NerpFormsBot(discord.Client):
 
     def _is_search_seizure_warrant(self, submission: Submission) -> bool:
         return self._request_type(submission).casefold() == "search or seizure warrant"
+
+    def _has_dedicated_court_order_workflow(self, submission: Submission) -> bool:
+        """Keep the intake notice limited to Court Order types the bot cannot process yet."""
+        return self._is_arrest_warrant(submission) or self._is_search_seizure_warrant(submission)
 
     @staticmethod
     def _answer(payload: dict[str, str], *names: str) -> str:

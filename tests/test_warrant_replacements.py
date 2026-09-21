@@ -144,6 +144,20 @@ def test_only_arrest_warrant_uses_arrest_warrant_commands() -> None:
     assert not bot._is_arrest_warrant(_submission({"Request Type": "Search or Seizure Warrant"}))
 
 
+def test_search_seizure_warrant_is_a_supported_court_order_workflow() -> None:
+    bot = _bot()
+
+    assert bot._has_dedicated_court_order_workflow(
+        _submission({"Request Type": "Arrest Warrant"})
+    )
+    assert bot._has_dedicated_court_order_workflow(
+        _submission({"Request Type": "Search or Seizure Warrant"})
+    )
+    assert not bot._has_dedicated_court_order_workflow(
+        _submission({"Request Type": "Subpoena"})
+    )
+
+
 def test_search_seizure_warrant_replacements_keep_three_subjects_distinct() -> None:
     payload = {
         "Request Type": "Search or Seizure Warrant",
