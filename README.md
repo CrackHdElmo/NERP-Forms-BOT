@@ -12,6 +12,9 @@ deployment, the guided Discord resource wizard, and an end-to-end Court Order te
 [the first-time setup guide](docs/FIRST_TIME_SETUP.md). Keep that guide updated whenever the
 bot gains a workflow, command, permission, or hosting requirement.
 
+For day-to-day use, see the [Bot Staff and Player Reference Guide](docs/BOT_REFERENCE_GUIDE.md).
+It is the package copy of the service-desk-ready command reference for players and bot staff.
+
 ## Initial Discord design
 
 | Workflow | Discord destination | Visibility model |

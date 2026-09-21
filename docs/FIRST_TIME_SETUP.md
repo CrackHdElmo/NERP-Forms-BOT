@@ -15,6 +15,10 @@ Business Licensing, but those additional form workflows should not be
 represented as automated until their individual intake and review rules have
 been configured and tested.
 
+For the separate day-to-day command reference for players and staff, use
+[Bot Staff and Player Reference Guide](BOT_REFERENCE_GUIDE.md). Keep both documents aligned
+whenever a command, role boundary, or workflow changes.
+
 ## Before you begin
 
 You need administrator access to:
