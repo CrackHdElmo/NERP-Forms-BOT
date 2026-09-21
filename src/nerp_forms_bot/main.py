@@ -1155,6 +1155,23 @@ class NerpFormsBot(discord.Client):
                     "You do not hold the role you are trying to self-assign.", ephemeral=True
                 )
                 return
+            current_assignments = await self.store.get_case_assignments(submission.id)
+            selected_slot = next(
+                (
+                    item
+                    for item in current_assignments
+                    if item.assignment_type == assignment_type.value
+                    and item.assignment_slot == assignment_slot.value
+                ),
+                None,
+            )
+            if self_assignment and selected_slot and selected_slot.user_id != interaction.user.id:
+                await interaction.response.send_message(
+                    f"{self._assignment_label(assignment_type.value)} {assignment_slot.value} is already "
+                    "assigned. Choose the other slot or ask DOJ/PD Command to reassign it.",
+                    ephemeral=True,
+                )
+                return
 
             await interaction.response.defer(ephemeral=True, thinking=True)
             assigned_at = datetime.now(UTC).replace(microsecond=0).isoformat()
