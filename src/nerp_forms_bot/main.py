@@ -2620,18 +2620,29 @@ class NerpFormsBot(discord.Client):
         )
         classified = "Classified" if classified_answer.lower() in {"yes", "y"} else "Unclassified"
         is_search_seizure = self._is_search_seizure_warrant(submission)
+        is_subpoena = self._is_subpoena(submission)
         subjects = self._answers_for_prefix(
             submission.payload,
-            "Subject Name of Search or Seizure:" if is_search_seizure else "Subject / Arrestee Name:",
+            "Subject Name of Subpoena:"
+            if is_subpoena
+            else "Subject Name of Search or Seizure:"
+            if is_search_seizure
+            else "Subject / Arrestee Name:",
         )
         citizen_ids = self._answers_for_prefix(submission.payload, "Subject Citizen ID:")
-        charges = self._answers_for_prefix(
+        subject_detail_values = self._answers_for_prefix(
             submission.payload,
-            "Request Type:" if is_search_seizure else "Initial Charges To Be Filed Against Subject:",
+            "Purpose of Subpoena:"
+            if is_subpoena
+            else "Request Type:"
+            if is_search_seizure
+            else "Initial Charges To Be Filed Against Subject:",
         )
-        probable_causes = self._answers_for_prefix(
+        narrative_values = self._answers_for_prefix(
             submission.payload,
-            "Probable Cause For Search or Seizure:"
+            "Subpoena Details as It Will Appear on The Order:"
+            if is_subpoena
+            else "Probable Cause For Search or Seizure:"
             if is_search_seizure
             else "Probable Cause For Arrest:",
         )
@@ -2639,8 +2650,8 @@ class NerpFormsBot(discord.Client):
         subject_lines = [
             f"{number}. {self._value_at(subjects, number - 1)} "
             f"({self._value_at(citizen_ids, number - 1)}) — "
-            f"{self._value_at(charges, number - 1)}"
-            for number in range(1, max(len(subjects), len(citizen_ids), len(charges)) + 1)
+            f"{self._value_at(subject_detail_values, number - 1)}"
+            for number in range(1, max(len(subjects), len(citizen_ids), len(subject_detail_values)) + 1)
         ]
         embed = discord.Embed(
             title=f"Closed {submission.workflow.replace('_', ' ').title()} — {submission.request_id}",
@@ -2657,6 +2668,8 @@ class NerpFormsBot(discord.Client):
                 f"**Type:** {self._answer(submission.payload, 'Request Type') or submission.workflow}\n"
                 f"**Requester:** {self._answer(submission.payload, 'Requestors Name:') or 'N/A'}\n"
                 f"**Agency:** {self._answer(submission.payload, 'Requesting Agency:') or 'N/A'}\n"
+                f"**Primary Case Officer:** {self._answer_prefix(submission.payload, 'Primary Case Officer') or 'Unspecified'}\n"
+                f"**Case Officer Agency:** {self._answer_prefix(submission.payload, 'Law Enforcement Agency Assigned to Case:') or 'Unspecified'}\n"
                 f"**Docket / Off-Docket:** {self._existing_docket_reference(submission.payload) or 'N/A'}"
             ),
             inline=False,
@@ -2726,24 +2739,25 @@ class NerpFormsBot(discord.Client):
             )
         embed.set_footer(text=f"Closed at {closed_at}")
         records = [embed]
-        for number, probable_cause in enumerate(probable_causes, start=1):
-            if probable_cause.strip().upper() in {"", "N/A", "NA", "NONE"}:
+        narrative_label = "Submitted subpoena details" if is_subpoena else "Submitted probable cause"
+        for number, narrative in enumerate(narrative_values, start=1):
+            if narrative.strip().upper() in {"", "N/A", "NA", "NONE"}:
                 continue
             subject_name = self._value_at(subjects, number - 1)
-            for part, chunk in enumerate(self._discord_embed_chunks(probable_cause), start=1):
+            for part, chunk in enumerate(self._discord_embed_chunks(narrative), start=1):
                 continuation = f" (continued {part})" if part > 1 else ""
-                probable_cause_embed = discord.Embed(
-                    title=f"Submitted probable cause — {submission.request_id}",
+                narrative_embed = discord.Embed(
+                    title=f"{narrative_label} — {submission.request_id}",
                     color=discord.Color.dark_grey(),
                     timestamp=datetime.fromisoformat(closed_at),
                 )
-                probable_cause_embed.add_field(
+                narrative_embed.add_field(
                     name=f"Subject {number}: {subject_name}{continuation}",
                     value=chunk,
                     inline=False,
                 )
-                probable_cause_embed.set_footer(text=f"Staff record for {submission.request_id}")
-                records.append(probable_cause_embed)
+                narrative_embed.set_footer(text=f"Staff record for {submission.request_id}")
+                records.append(narrative_embed)
         for number, evidence in enumerate(evidence_links, start=1):
             if evidence.strip().upper() in {"", "N/A", "NA", "NONE"}:
                 continue
@@ -2917,19 +2931,21 @@ class NerpFormsBot(discord.Client):
             ),
             color=discord.Color.dark_blue(),
         )
-        for label, field in (
-            ("Requester", "Requestors Name:"),
-            ("Requesting agency", "Requesting Agency:"),
-            ("Request type", "Request Type"),
-            ("Existing docket / off-docket", "__existing_reference__"),
+        for label, field, show_when_empty in (
+            ("Requester", "Requestors Name:", False),
+            ("Requesting agency", "Requesting Agency:", False),
+            ("Primary case officer", "Primary Case Officer", True),
+            ("Case officer agency", "Law Enforcement Agency Assigned to Case:", True),
+            ("Request type", "Request Type", False),
+            ("Existing docket / off-docket", "__existing_reference__", False),
         ):
             value = (
                 self._existing_docket_reference(submission.payload)
                 if field == "__existing_reference__"
                 else self._answer_prefix(submission.payload, field)
             )
-            if value:
-                embed.add_field(name=label, value=value[:1024], inline=False)
+            if value or show_when_empty:
+                embed.add_field(name=label, value=(value or "Unspecified")[:1024], inline=False)
         await channel.send(embed=embed)
         await channel.send(embed=await self._case_assignment_embed(submission))
         if not self._has_dedicated_court_order_workflow(submission):
@@ -3164,7 +3180,7 @@ class NerpFormsBot(discord.Client):
         """Render every submitted subject in the private intake ticket without omitting repeats."""
         request_type = self._answer(payload, "Request Type").strip().casefold()
         is_search_seizure = request_type == "search or seizure warrant"
-        is_subpoena = request_type == "subpoena"
+        is_subpoena = request_type.startswith("subpoena")
         subjects = self._answers_for_prefix(
             payload,
             "Subject Name of Subpoena:"
@@ -3174,7 +3190,38 @@ class NerpFormsBot(discord.Client):
             else "Subject / Arrestee Name:",
         )
         citizen_ids = self._answers_for_prefix(payload, "Subject Citizen ID:")
-        details_label = "Purpose" if is_subpoena else "Warrant type" if is_search_seizure else "Initial charges"
+        if is_subpoena:
+            produce_dates = self._answers_for_prefix(
+                payload, "Date to Produce Materials By or Appear"
+            )
+            subpoena_types = self._answers_for_prefix(payload, "Purpose of Subpoena:")
+            subpoena_details = self._answers_for_prefix(
+                payload, "Subpoena Details as It Will Appear on The Order:"
+            )
+            evidence_links = self._answers_for_prefix(payload, "Please include any evidence")
+            count = max(
+                len(subjects),
+                len(citizen_ids),
+                len(produce_dates),
+                len(subpoena_types),
+                len(subpoena_details),
+                len(evidence_links),
+            )
+            return [
+                "\n".join(
+                    (
+                        f"**Name:** {self._value_at(subjects, index)}",
+                        f"**Citizen ID:** {self._value_at(citizen_ids, index)}",
+                        f"**Date to produce / appear:** {self._value_at(produce_dates, index)}",
+                        f"**Subpoena type:** {self._value_at(subpoena_types, index)}",
+                        f"**Subpoena details:** {self._value_at(subpoena_details, index)}",
+                        f"**Evidence links:** {self._value_at(evidence_links, index)}",
+                    )
+                )
+                for index in range(count)
+            ]
+
+        details_label = "Warrant type" if is_search_seizure else "Initial charges"
         charges = self._answers_for_prefix(
             payload,
             "Purpose of Subpoena:"
@@ -3230,7 +3277,8 @@ class NerpFormsBot(discord.Client):
         return self._request_type(submission).casefold() == "search or seizure warrant"
 
     def _is_subpoena(self, submission: Submission) -> bool:
-        return self._request_type(submission).casefold() == "subpoena"
+        """Accept the main Subpoena type and its descriptive Form choice labels."""
+        return self._request_type(submission).casefold().startswith("subpoena")
 
     def _has_dedicated_court_order_workflow(self, submission: Submission) -> bool:
         """Keep the intake notice limited to Court Order types the bot cannot process yet."""

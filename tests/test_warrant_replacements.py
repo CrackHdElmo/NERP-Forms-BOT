@@ -241,6 +241,40 @@ def test_subpoena_is_a_supported_court_order_workflow() -> None:
     assert bot._has_dedicated_court_order_workflow(_submission({"Request Type": "Subpoena"}))
 
 
+def test_subpoena_descriptive_form_choice_uses_the_dedicated_workflow() -> None:
+    bot = _bot()
+    submission = _submission(
+        {"Request Type": "Subpoena - Documents/Media & Order to Appear"}
+    )
+
+    assert bot._is_subpoena(submission)
+    assert bot._has_dedicated_court_order_workflow(submission)
+
+
+def test_subpoena_private_ticket_uses_subpoena_specific_subject_fields() -> None:
+    payload = {
+        "Request Type": "Subpoena - Order to Produce Documents, Media, Materials",
+        "Subject Name of Subpoena:": "Records Custodian",
+        "Subject Citizen ID:": "DHDY5287",
+        "Date to Produce Materials By or Appear:": "September 24, 2026",
+        "Purpose of Subpoena:": "Order to appear",
+        "Subpoena Details as It Will Appear on The Order:": "Appear before the Court.",
+        "Please include any evidence": "https://example.test/subpoena-evidence",
+    }
+
+    details = _bot()._court_order_subject_details(payload)
+
+    assert len(details) == 1
+    assert "Records Custodian" in details[0]
+    assert "DHDY5287" in details[0]
+    assert "September 24, 2026" in details[0]
+    assert "Order to appear" in details[0]
+    assert "Appear before the Court." in details[0]
+    assert "subpoena-evidence" in details[0]
+    assert "Initial charges" not in details[0]
+    assert "Probable cause" not in details[0]
+
+
 def test_refresh_court_order_reloads_the_original_form_row(tmp_path: Path) -> None:
     async def exercise() -> tuple[Submission, Submission | None]:
         root = Path(__file__).resolve().parents[1] / "config" / "environments"

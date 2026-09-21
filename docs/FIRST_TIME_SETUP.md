@@ -295,8 +295,10 @@ plus these exact table placeholders:
 {{SUBPOENA_DETAILS}}
 ```
 
-Its Form responses must use **Subpoena** as the main request type. The bot
-maps each subject's `Purpose of Subpoena:` response into that subject's
+Its Form responses must use a request-type option that begins with
+**Subpoena**. This permits descriptive choices such as **Subpoena -
+Documents/Media & Order to Appear** without losing the dedicated workflow. The
+bot maps each subject's `Purpose of Subpoena:` response into that subject's
 `SUBPOENA_TYPE` field. Evidence remains in the private Discord ticket and its
 staff closure record rather than appearing on the player-facing PNG.
 
