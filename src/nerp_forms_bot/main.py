@@ -196,10 +196,10 @@ class CourtOrderMergeView(discord.ui.View):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             result = await self.bot._merge_court_order_into_docket(
-                interaction,
                 submission_id=self.submission_id,
                 docket_thread_id=self.docket_thread_id,
                 close_source=close_source,
+                actor=interaction.user,
             )
         except discord.Forbidden:
             LOGGER.warning("The bot lacks permission to merge Court Order %s", self.submission_id)
@@ -1377,6 +1377,128 @@ class NerpFormsBot(discord.Client):
             await interaction.followup.send("Transfer accepted and assignment updated.", ephemeral=True)
 
         @self.tree.command(
+            name="rename-docket",
+            description="Change the title of this active Docket Forum post.",
+            guild=guild,
+        )
+        @app_commands.describe(title="The new Docket title, up to 100 characters.")
+        async def rename_docket(interaction: discord.Interaction, title: str) -> None:
+            if not isinstance(interaction.channel, discord.Thread):
+                await interaction.response.send_message(
+                    "Run this command inside the Docket Forum post you want to rename.", ephemeral=True
+                )
+                return
+            if not self._can_merge_court_order(interaction):
+                await interaction.response.send_message(
+                    "Only a configured bot administrator, Judge, or Attorney General can rename a Docket.",
+                    ephemeral=True,
+                )
+                return
+            try:
+                docket_thread = await self._resolve_docket_thread(str(interaction.channel.id))
+            except ValueError as error:
+                await interaction.response.send_message(str(error), ephemeral=True)
+                return
+            new_title = title.strip()
+            if not new_title or len(new_title) > 100:
+                await interaction.response.send_message(
+                    "The Docket title must contain between 1 and 100 characters.", ephemeral=True
+                )
+                return
+            old_title = docket_thread.name
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                await docket_thread.edit(
+                    name=new_title,
+                    reason=f"NERP Forms BOT Docket rename by {interaction.user}",
+                )
+                await docket_thread.send(
+                    f"{interaction.user.mention} renamed this Docket from **{old_title}** to **{new_title}**."
+                )
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    "The bot needs access to this Docket and **Manage Threads** permission to rename it.",
+                    ephemeral=True,
+                )
+                return
+            await interaction.followup.send(f"Renamed this Docket to **{new_title}**.", ephemeral=True)
+
+        @self.tree.command(
+            name="import-court-order",
+            description="Import an off-docket Court Order into this Docket Forum post.",
+            guild=guild,
+        )
+        @app_commands.describe(
+            court_order_id="The Court Order ID, for example COR-000007.",
+            disposition="Keep the original Court Order open or close it after a successful import.",
+        )
+        @app_commands.choices(
+            disposition=[
+                app_commands.Choice(name="Keep original Court Order open", value="keep_open"),
+                app_commands.Choice(name="Import and close original Court Order", value="close"),
+            ]
+        )
+        async def import_court_order(
+            interaction: discord.Interaction,
+            court_order_id: str,
+            disposition: app_commands.Choice[str],
+        ) -> None:
+            if not isinstance(interaction.channel, discord.Thread):
+                await interaction.response.send_message(
+                    "Run this command inside the destination Docket Forum post.", ephemeral=True
+                )
+                return
+            if not self._can_merge_court_order(interaction):
+                await interaction.response.send_message(
+                    "Only a configured bot administrator, Judge, or Attorney General can import a Court Order.",
+                    ephemeral=True,
+                )
+                return
+            try:
+                docket_thread = await self._resolve_docket_thread(str(interaction.channel.id))
+            except ValueError as error:
+                await interaction.response.send_message(str(error), ephemeral=True)
+                return
+            match = re.fullmatch(r"\s*(COR-\d{6})\s*", court_order_id, flags=re.IGNORECASE)
+            if not match:
+                await interaction.response.send_message(
+                    "Provide the bot-issued Court Order ID in the format `COR-000007`.", ephemeral=True
+                )
+                return
+            submission = await self.store.get_by_request_id(match.group(1))
+            if not submission or submission.workflow != "court_order" or submission.status == "closed":
+                await interaction.response.send_message(
+                    "That is not an active bot-managed Court Order available for import.", ephemeral=True
+                )
+                return
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                result = await self._merge_court_order_into_docket(
+                    submission_id=submission.id,
+                    docket_thread_id=docket_thread.id,
+                    close_source=disposition.value == "close",
+                    actor=interaction.user,
+                )
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    "The bot needs permission to read the Court Order and send messages in this Docket post. "
+                    "When closing, it also needs permission to manage the original private ticket.",
+                    ephemeral=True,
+                )
+                return
+            except (CourtOrderMergeError, RuntimeError, ValueError) as error:
+                await interaction.followup.send(str(error), ephemeral=True)
+                return
+            except Exception:
+                LOGGER.exception("Manual Court Order import failed for %s", submission.request_id)
+                await interaction.followup.send(
+                    "The Court Order could not be imported. Check the Wispbyte console for the safe diagnostic message.",
+                    ephemeral=True,
+                )
+                return
+            await interaction.followup.send(result, ephemeral=True)
+
+        @self.tree.command(
             name="merge-court-order-to-docket",
             description="Copy an off-docket Court Order into a selected Docket Forum post.",
             guild=guild,
@@ -2465,11 +2587,55 @@ class NerpFormsBot(discord.Client):
         )
         thread = thread_with_message.thread
         await thread.send(embed=await self._case_assignment_embed(submission))
+        await self._automatically_import_referenced_court_orders(thread, submission)
         await thread.send(
             "This Docket was created from the Case Management System form. "
             "Authorized staff may use the normal assignment and Court Order merge commands here."
         )
         return thread
+
+    async def _automatically_import_referenced_court_orders(
+        self, docket_thread: discord.Thread, submission: Submission
+    ) -> None:
+        """Forward valid Form-referenced Court Orders while keeping the original investigations open."""
+        bot_user = self.user
+        if not bot_user:
+            raise RuntimeError("The bot user is not available for the automatic import audit.")
+        seen_request_ids: set[str] = set()
+        for reference in self._answers_for_prefix(submission.payload, "Import Off-Docket Court Order"):
+            match = re.search(r"\bCOR-\d{6}\b", reference, flags=re.IGNORECASE)
+            if not match:
+                await docket_thread.send(
+                    f"Automatic Court Order import skipped for **{reference}** because it is not a bot-issued `COR-######` ID."
+                )
+                continue
+            request_id = match.group(0).upper()
+            if request_id in seen_request_ids:
+                continue
+            seen_request_ids.add(request_id)
+            court_order = await self.store.get_by_request_id(request_id)
+            if not court_order or court_order.workflow != "court_order" or court_order.status == "closed":
+                await docket_thread.send(
+                    f"Automatic Court Order import skipped for **{request_id}** because no active bot-managed Court Order was found."
+                )
+                continue
+            try:
+                await self._merge_court_order_into_docket(
+                    submission_id=court_order.id,
+                    docket_thread_id=docket_thread.id,
+                    close_source=False,
+                    actor=bot_user,
+                )
+            except (CourtOrderMergeError, RuntimeError, ValueError, discord.Forbidden):
+                LOGGER.exception(
+                    "Automatic Court Order import failed for %s into Docket %s",
+                    request_id,
+                    docket_thread.id,
+                )
+                await docket_thread.send(
+                    f"Automatic Court Order import could not complete for **{request_id}**. "
+                    "Leadership can use `/import-court-order` here after reviewing the source ticket."
+                )
 
     def _docket_thread_name(self, submission: Submission) -> str:
         """Produce a readable, stable forum-post title from the submitted case parties."""
@@ -2557,11 +2723,11 @@ class NerpFormsBot(discord.Client):
 
     async def _merge_court_order_into_docket(
         self,
-        interaction: discord.Interaction,
         *,
         submission_id: int,
         docket_thread_id: int,
         close_source: bool,
+        actor: discord.abc.User,
     ) -> str:
         """Forward an auditable Court Order snapshot into a Docket post, optionally closing the source."""
         submission = await self.store.get_by_id(submission_id)
@@ -2581,20 +2747,20 @@ class NerpFormsBot(discord.Client):
                 "Use that original Docket post to preserve one continuous case record."
             )
 
-        actor_name = interaction.user.display_name.strip() or interaction.user.name
+        actor_name = getattr(actor, "display_name", actor.name).strip() or actor.name
         merged_at = datetime.now(UTC).replace(microsecond=0).isoformat()
         last_forwarded_id = previous_merge.last_forwarded_message_id if previous_merge else None
         if previous_merge:
             header = "Court Order update merged into Docket"
             description = (
                 f"Additional content from **{submission.request_id}** was forwarded from its private "
-                f"Court Order ticket by {interaction.user.mention}."
+                f"Court Order ticket by {actor.mention}."
             )
         else:
             header = "Court Order merged into Docket"
             description = (
                 f"**{submission.request_id}** was copied from its private investigative Court Order ticket "
-                f"by {interaction.user.mention}. Forwarded messages retain the original Discord authorship "
+                f"by {actor.mention}. Forwarded messages retain the original Discord authorship "
                 "and attachments."
             )
         await docket_thread.send(
@@ -2619,7 +2785,7 @@ class NerpFormsBot(discord.Client):
         await self.store.record_court_order_docket_merge(
             submission_id=submission.id,
             docket_thread_id=docket_thread.id,
-            merged_by_user_id=interaction.user.id,
+            merged_by_user_id=actor.id,
             merged_by_name=actor_name,
             merged_at=merged_at,
             last_forwarded_message_id=newest_message_id,
@@ -2627,13 +2793,13 @@ class NerpFormsBot(discord.Client):
         )
         if not close_source:
             source_notice = await source.send(
-                f"{interaction.user.mention} merged **{submission.request_id}** into {docket_thread.mention}. "
+                f"{actor.mention} merged **{submission.request_id}** into {docket_thread.mention}. "
                 "This Court Order remains open; a later merge can forward additional ticket activity."
             )
             await self.store.record_court_order_docket_merge(
                 submission_id=submission.id,
                 docket_thread_id=docket_thread.id,
-                merged_by_user_id=interaction.user.id,
+                merged_by_user_id=actor.id,
                 merged_by_name=actor_name,
                 merged_at=merged_at,
                 last_forwarded_message_id=source_notice.id,
@@ -2644,11 +2810,11 @@ class NerpFormsBot(discord.Client):
                 f"{forwarded_count} message(s). The original Court Order remains open."
             )
 
-        closure_note = f"Merged into Docket {docket_thread.mention} by {interaction.user.mention}."
+        closure_note = f"Merged into Docket {docket_thread.mention} by {actor.mention}."
         records_channel = await self._get_or_create_case_records_channel()
         for record_embed in await self._case_record_embeds(
             submission=submission,
-            closed_by=interaction.user,
+            closed_by=actor,
             closed_at=merged_at,
             closure_note=closure_note,
             source_deleted=True,
@@ -2656,7 +2822,7 @@ class NerpFormsBot(discord.Client):
             await records_channel.send(embed=record_embed)
         recorded = await self.store.mark_closed(
             submission_id=submission.id,
-            closer_user_id=interaction.user.id,
+            closer_user_id=actor.id,
             closer_name=actor_name,
             closed_at=merged_at,
             closed_note=closure_note,
@@ -2666,7 +2832,7 @@ class NerpFormsBot(discord.Client):
         await self.store.record_court_order_docket_merge(
             submission_id=submission.id,
             docket_thread_id=docket_thread.id,
-            merged_by_user_id=interaction.user.id,
+            merged_by_user_id=actor.id,
             merged_by_name=actor_name,
             merged_at=merged_at,
             last_forwarded_message_id=newest_message_id,

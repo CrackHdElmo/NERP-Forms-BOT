@@ -103,6 +103,12 @@ either keep the original Court Order open or, after forwarding its messages and 
 post the normal permanent staff record and close the original private ticket. A retained Court
 Order can be merged again later to forward only newer ticket activity to the same Docket post.
 
+Leadership can run `/rename-docket` inside an active Docket Forum post to change its title. A
+new Docket Form filing automatically imports each valid referenced `COR-######` Court Order while
+leaving its original private ticket open. To import an order later, or to close its source after a
+successful import, authorized leadership can run `/import-court-order` inside the destination
+Docket post and select the desired disposition.
+
 `/assign-case` supports two separate optional record slots for each Prosecutor, Judge, Defense
 Attorney, and PD Officer. Every slot is shown as a named member or **Unassigned** in the ticket.
 Eligible staff may self-assign; configured DOJ/PD Command and bot administrators may assign or

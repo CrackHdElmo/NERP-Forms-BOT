@@ -244,6 +244,13 @@ Pending Review. It builds the post title from the Docket ID and first petitioner
 so a separate case-caption question is optional rather than required. The Docket Forum's parent
 permissions govern who can read and participate in the post.
 
+Any valid `COR-######` reference entered in an `Import Off-Docket Court Order` field is copied
+into the new Docket automatically, including its source messages and attachments. Automatic
+imports keep the original private Court Order open. A configured administrator, Judge, or Attorney
+General can use `/import-court-order` inside the Docket post later and choose whether to keep or
+close the original. The same leadership roles can use `/rename-docket` in an active Docket post
+to apply a clearer case title.
+
 If you redesign the wording substantially, submit a test response and confirm
 that the bot identifies every field before using it operationally.
 
@@ -400,6 +407,8 @@ environment when old Sheet rows must not create a flood of tickets.
 | `/court-order-sync` | Configured bot administrator | Immediately import unprocessed Form responses |
 | `/refresh-court-order` | Configured administrator, Judge, or Attorney General | Reloads the active ticket from its original Form response and posts refreshed intake and subject embeds without changing its request ID |
 | `/merge-court-order-to-docket` | Configured administrator, Judge, or Attorney General | In an active off-docket Court Order, select a Docket Forum post by link/ID, then choose whether to keep the source open or copy and close it |
+| `/import-court-order` | Configured administrator, Judge, or Attorney General | In the destination Docket Forum post, import an active `COR-######` Court Order and choose whether its source stays open or closes |
+| `/rename-docket` | Configured administrator, Judge, or Attorney General | Changes the title of the active Docket Forum post and posts an audit notice |
 | `/claim-court-order` | Matching requester | Claims the request in its own ticket; no numeric Discord user ID required |
 | `/add-ticket-member` | Verified requester or bot administrator | Grants one server member access to the current private bot ticket |
 | `/assign-case` | Eligible staff self-assignment, or configured DOJ/PD Command and administrators | Assigns or reassigns a selected first/second slot for Prosecutor, Judge, Defense Attorney, or PD Officer in the active ticket/Docket post |
