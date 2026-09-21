@@ -356,12 +356,19 @@ class SubmissionStore:
         return self._submission_from_row(row) if row else None
 
     async def get_by_channel_id(self, channel_id: int) -> Submission | None:
-        """Find the most recent request assigned to the current ticket or Forum post."""
+        """Find a request from its private ticket or its linked, still-active Docket Forum post."""
         async with aiosqlite.connect(self.path) as database:
             database.row_factory = aiosqlite.Row
             cursor = await database.execute(
-                "SELECT * FROM submissions WHERE discord_channel_id = ? ORDER BY id DESC LIMIT 1",
-                (channel_id,),
+                """
+                SELECT submissions.* FROM submissions
+                LEFT JOIN court_order_docket_merges
+                    ON court_order_docket_merges.submission_id = submissions.id
+                WHERE submissions.discord_channel_id = ?
+                   OR court_order_docket_merges.docket_thread_id = ?
+                ORDER BY submissions.id DESC LIMIT 1
+                """,
+                (channel_id, channel_id),
             )
             row = await cursor.fetchone()
         return self._submission_from_row(row) if row else None

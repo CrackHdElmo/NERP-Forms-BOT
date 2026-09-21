@@ -294,7 +294,7 @@ def test_case_assignment_and_accepted_transfer_are_auditable(tmp_path) -> None:
 
 
 def test_court_order_docket_merge_tracks_its_destination_and_sync_checkpoint(tmp_path) -> None:
-    async def exercise() -> object:
+    async def exercise() -> tuple[object, object]:
         store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
         await store.initialize()
         submission = await store.begin_submission(
@@ -304,6 +304,7 @@ def test_court_order_docket_merge_tracks_its_destination_and_sync_checkpoint(tmp
             payload={},
         )
         assert submission is not None
+        await store.mark_ticket_created(submission.id, 100, None, None)
         await store.record_court_order_docket_merge(
             submission_id=submission.id,
             docket_thread_id=200,
@@ -322,11 +323,16 @@ def test_court_order_docket_merge_tracks_its_destination_and_sync_checkpoint(tmp
             last_forwarded_message_id=301,
             source_closed=True,
         )
-        return await store.get_court_order_docket_merge(submission.id)
+        return (
+            await store.get_court_order_docket_merge(submission.id),
+            await store.get_by_channel_id(200),
+        )
 
-    merge = asyncio.run(exercise())
+    merge, linked_submission = asyncio.run(exercise())
 
     assert merge is not None
     assert merge.docket_thread_id == 200
     assert merge.last_forwarded_message_id == 301
     assert merge.source_closed is True
+    assert linked_submission is not None
+    assert linked_submission.request_id == "COR-000001"
