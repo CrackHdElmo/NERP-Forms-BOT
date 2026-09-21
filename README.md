@@ -97,11 +97,13 @@ retry command. Set `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` to a larger value (for e
 ## Docket merges and case assignments
 
 An authorized administrator, Judge, or Attorney General can run
-`/merge-court-order-to-docket` inside an active off-docket Court Order ticket and provide the
-destination Docket Forum post's Discord link or ID. The bot presents an explicit choice to
-either keep the original Court Order open or, after forwarding its messages and attachments,
-post the normal permanent staff record and close the original private ticket. A retained Court
-Order can be merged again later to forward only newer ticket activity to the same Docket post.
+`/merge-court-order-to-docket` from either side of an active case relationship without using
+Discord's internal channel IDs. In the source private Court Order ticket, provide only the
+destination `docket_id` (for example, `DCK-000010`). In the destination Docket Forum post,
+provide only the source `court_order_id` (for example, `COR-000007`). The command merges
+immediately and leaves the original Court Order open for continuing investigative work. A
+retained Court Order can be merged again later to forward only newer ticket activity to the same
+Docket post.
 
 Leadership can run `/rename-docket` inside an active Docket Forum post to change its title. A
 new Docket Form filing automatically imports each valid referenced `COR-######` Court Order while

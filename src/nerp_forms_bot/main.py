@@ -177,62 +177,6 @@ class SetupNamesModal(discord.ui.Modal):
         )
 
 
-class CourtOrderMergeView(discord.ui.View):
-    """Give authorized staff an explicit, reversible choice after choosing a Docket post."""
-
-    def __init__(self, bot: NerpFormsBot, submission_id: int, docket_thread_id: int) -> None:
-        super().__init__(timeout=900)
-        self.bot = bot
-        self.submission_id = submission_id
-        self.docket_thread_id = docket_thread_id
-
-    async def _merge(self, interaction: discord.Interaction, *, close_source: bool) -> None:
-        if not self.bot._can_merge_court_order(interaction):
-            await interaction.response.send_message(
-                "Only a configured bot administrator, Judge, or Attorney General can merge a Court Order.",
-                ephemeral=True,
-            )
-            return
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            result = await self.bot._merge_court_order_into_docket(
-                submission_id=self.submission_id,
-                docket_thread_id=self.docket_thread_id,
-                close_source=close_source,
-                actor=interaction.user,
-            )
-        except discord.Forbidden:
-            LOGGER.warning("The bot lacks permission to merge Court Order %s", self.submission_id)
-            await interaction.followup.send(
-                "The bot needs permission to read the Court Order, send messages in the selected Docket post, "
-                "and, when closing, manage the private ticket. Confirm its role permissions and retry.",
-                ephemeral=True,
-            )
-            return
-        except (CourtOrderMergeError, RuntimeError, ValueError) as error:
-            await interaction.followup.send(str(error), ephemeral=True)
-            return
-        except Exception:
-            LOGGER.exception("Court Order merge failed for submission %s", self.submission_id)
-            await interaction.followup.send(
-                "The Court Order could not be merged. Check the Wispbyte console for the safe diagnostic message.",
-                ephemeral=True,
-            )
-            return
-        for child in self.children:
-            child.disabled = True
-        await interaction.edit_original_response(view=self)
-        await interaction.followup.send(result, ephemeral=True)
-
-    @discord.ui.button(label="Merge and keep Court Order open", style=discord.ButtonStyle.secondary)
-    async def keep_open(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self._merge(interaction, close_source=False)
-
-    @discord.ui.button(label="Merge and close Court Order", style=discord.ButtonStyle.danger)
-    async def close_source(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self._merge(interaction, close_source=True)
-
-
 class NerpFormsBot(discord.Client):
     """Minimal Discord client; workflow handlers are added in later milestones."""
 
@@ -1500,54 +1444,107 @@ class NerpFormsBot(discord.Client):
 
         @self.tree.command(
             name="merge-court-order-to-docket",
-            description="Copy an off-docket Court Order into a selected Docket Forum post.",
+            description="Merge a Court Order into a Docket using its case record ID.",
             guild=guild,
         )
         @app_commands.describe(
-            docket_entry="The destination Docket Forum post URL or its Discord ID."
+            court_order_id="Court Order ID when this is run in the destination Docket, e.g. COR-000007.",
+            docket_id="Docket ID when this is run in the source Court Order, e.g. DCK-000010.",
         )
         async def merge_court_order_to_docket(
             interaction: discord.Interaction,
-            docket_entry: str,
+            court_order_id: str | None = None,
+            docket_id: str | None = None,
         ) -> None:
-            if not isinstance(interaction.channel, discord.TextChannel):
-                await interaction.response.send_message(
-                    "Run this command inside the off-docket Court Order ticket you want to merge.",
-                    ephemeral=True,
-                )
-                return
             if not self._can_merge_court_order(interaction):
                 await interaction.response.send_message(
                     "Only a configured bot administrator, Judge, or Attorney General can merge a Court Order.",
                     ephemeral=True,
                 )
                 return
-            submission = await self.store.get_by_channel_id(interaction.channel.id)
-            if not submission or submission.workflow != "court_order" or submission.status == "closed":
-                await interaction.response.send_message(
-                    "This is not an active Court Order ticket.", ephemeral=True
+            channel = interaction.channel
+            if isinstance(channel, discord.TextChannel):
+                submission = await self.store.get_by_channel_id(channel.id)
+                if not submission or submission.workflow != "court_order" or submission.status == "closed":
+                    await interaction.response.send_message(
+                        "This is not an active Court Order ticket.", ephemeral=True
+                    )
+                    return
+                off_docket_category = await self._resolve_category(
+                    "off_docket_tickets_category", "off_docket_tickets"
                 )
-                return
-            off_docket_category = await self._resolve_category(
-                "off_docket_tickets_category", "off_docket_tickets"
-            )
-            if interaction.channel.category_id != off_docket_category.id:
+                if channel.category_id != off_docket_category.id:
+                    await interaction.response.send_message(
+                        "Only an off-docket Court Order ticket can be merged into a Docket entry.",
+                        ephemeral=True,
+                    )
+                    return
+                if not docket_id:
+                    await interaction.response.send_message(
+                        "Run this in a Court Order ticket with the destination Docket ID, for example "
+                        "`/merge-court-order-to-docket docket_id:DCK-000010`.",
+                        ephemeral=True,
+                    )
+                    return
+                try:
+                    docket_thread = await self._resolve_docket_thread_by_request_id(docket_id)
+                except ValueError as error:
+                    await interaction.response.send_message(str(error), ephemeral=True)
+                    return
+            elif isinstance(channel, discord.Thread):
+                try:
+                    docket_thread = await self._resolve_docket_thread(str(channel.id))
+                except ValueError:
+                    await interaction.response.send_message(
+                        "Run this command inside an active Docket Forum post or an off-docket Court Order ticket.",
+                        ephemeral=True,
+                    )
+                    return
+                if not court_order_id:
+                    await interaction.response.send_message(
+                        "Run this in a Docket post with the Court Order ID, for example "
+                        "`/merge-court-order-to-docket court_order_id:COR-000007`.",
+                        ephemeral=True,
+                    )
+                    return
+                try:
+                    submission = await self._resolve_active_court_order(court_order_id)
+                except ValueError as error:
+                    await interaction.response.send_message(str(error), ephemeral=True)
+                    return
+            else:
                 await interaction.response.send_message(
-                    "Only an off-docket Court Order ticket can be merged into a Docket entry.",
+                    "Run this command inside the source Court Order ticket or the destination Docket Forum post.",
                     ephemeral=True,
                 )
                 return
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
             try:
-                docket_thread = await self._resolve_docket_thread(docket_entry)
-            except ValueError as error:
-                await interaction.response.send_message(str(error), ephemeral=True)
+                result = await self._merge_court_order_into_docket(
+                    submission_id=submission.id,
+                    docket_thread_id=docket_thread.id,
+                    close_source=False,
+                    actor=interaction.user,
+                )
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    "The bot needs permission to read the Court Order and send messages in the Docket post. "
+                    "Confirm its role permissions and retry.",
+                    ephemeral=True,
+                )
                 return
-            await interaction.response.send_message(
-                f"Ready to merge **{submission.request_id}** into {docket_thread.mention}. Choose whether "
-                "the original private Court Order remains open or is formally closed after the copy succeeds.",
-                view=CourtOrderMergeView(self, submission.id, docket_thread.id),
-                ephemeral=True,
-            )
+            except (CourtOrderMergeError, RuntimeError, ValueError) as error:
+                await interaction.followup.send(str(error), ephemeral=True)
+                return
+            except Exception:
+                LOGGER.exception("Court Order merge failed for %s", submission.request_id)
+                await interaction.followup.send(
+                    "The Court Order could not be merged. Check the Wispbyte console for the safe diagnostic message.",
+                    ephemeral=True,
+                )
+                return
+            await interaction.followup.send(result, ephemeral=True)
 
         @self.tree.command(
             name="close-ticket",
@@ -2720,6 +2717,28 @@ class NerpFormsBot(discord.Client):
         if target.archived or target.locked:
             raise ValueError("The selected Docket post is archived or locked and cannot receive a Court Order.")
         return target
+
+    async def _resolve_docket_thread_by_request_id(self, docket_id: str) -> discord.Thread:
+        """Resolve an active Docket Forum post from its bot-issued DCK identifier."""
+        match = re.fullmatch(r"\s*(DCK-\d{6})\s*", docket_id, flags=re.IGNORECASE)
+        if not match:
+            raise ValueError("Provide the bot-issued Docket ID in the format `DCK-000010`.")
+        submission = await self.store.get_by_request_id(match.group(1))
+        if not submission or submission.workflow != "new_docket" or submission.status == "closed":
+            raise ValueError("That is not an active bot-managed Docket available to receive a Court Order.")
+        if not submission.discord_channel_id:
+            raise ValueError("That Docket does not have an available Discord Forum post.")
+        return await self._resolve_docket_thread(str(submission.discord_channel_id))
+
+    async def _resolve_active_court_order(self, court_order_id: str) -> Submission:
+        """Resolve an active Court Order from its bot-issued COR identifier."""
+        match = re.fullmatch(r"\s*(COR-\d{6})\s*", court_order_id, flags=re.IGNORECASE)
+        if not match:
+            raise ValueError("Provide the bot-issued Court Order ID in the format `COR-000007`.")
+        submission = await self.store.get_by_request_id(match.group(1))
+        if not submission or submission.workflow != "court_order" or submission.status == "closed":
+            raise ValueError("That is not an active bot-managed Court Order available for import.")
+        return submission
 
     async def _merge_court_order_into_docket(
         self,
