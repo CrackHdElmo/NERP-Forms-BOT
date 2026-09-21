@@ -3062,7 +3062,9 @@ class NerpFormsBot(discord.Client):
             replacements[f"{{{{SUBJECT_{number}_NAME}}}}"] = self._value_at(subjects, index)
             replacements[f"{{{{S{number}ID}}}}"] = self._value_at(citizen_ids, index)
             replacements[f"{{{{SUBJECT_{number}_DATE}}}}"] = self._value_at(produce_dates, index)
-            replacements[f"{{{{SUBJECT_{number}_WARRANT_TYPE}}}}"] = self._value_at(purposes, index)
+            replacements[f"{{{{SUBJECT_{number}_SUBPOENA_TYPE}}}}"] = self._value_at(
+                purposes, index
+            )
         return replacements, None
 
     def _search_seizure_warrant_replacements(

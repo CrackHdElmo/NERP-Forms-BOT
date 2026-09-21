@@ -227,7 +227,7 @@ def test_subpoena_replacements_match_the_live_template_placeholders() -> None:
     assert replacements["{{SUBJECT_2_NAME}}"] == "Witness Example"
     assert replacements["{{SUBJECT_1_DATE}}"] == "September 25, 2026"
     assert replacements["{{SUBJECT_2_DATE}}"] == "September 26, 2026"
-    assert replacements["{{SUBJECT_1_WARRANT_TYPE}}"] == "Produce records"
+    assert replacements["{{SUBJECT_1_SUBPOENA_TYPE}}"] == "Produce records"
     assert replacements["{{SUBJECT_3_NAME}}"] == "N/A"
     assert replacements["{{SUBPOENA_DETAILS}}"] == (
         "Produce the requested records.\n\nAppear before the Court."

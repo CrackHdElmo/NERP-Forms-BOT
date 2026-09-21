@@ -285,6 +285,21 @@ type, with the per-subject `Request Type:` answer set to **Search** or
 from the template, the combined probable cause is over 2,080 characters, or the
 finished document would not fit on exactly one page.
 
+The Subpoena template uses the shared header and signature placeholders above,
+plus these exact table placeholders:
+
+```text
+{{SUBJECT_1_NAME}}          {{S1ID}}                   {{SUBJECT_1_DATE}}  {{SUBJECT_1_SUBPOENA_TYPE}}
+{{SUBJECT_2_NAME}}          {{S2ID}}                   {{SUBJECT_2_DATE}}  {{SUBJECT_2_SUBPOENA_TYPE}}
+{{SUBJECT_3_NAME}}          {{S3ID}}                   {{SUBJECT_3_DATE}}  {{SUBJECT_3_SUBPOENA_TYPE}}
+{{SUBPOENA_DETAILS}}
+```
+
+Its Form responses must use **Subpoena** as the main request type. The bot
+maps each subject's `Purpose of Subpoena:` response into that subject's
+`SUBPOENA_TYPE` field. Evidence remains in the private Discord ticket and its
+staff closure record rather than appearing on the player-facing PNG.
+
 ## 7. Connect Wispbyte to GitHub and add protected values
 
 1. Create a Wispbyte server with Python 3.12 or later. The Discord bot uses an

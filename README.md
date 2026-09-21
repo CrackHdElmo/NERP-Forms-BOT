@@ -132,7 +132,7 @@ and later-approval safeguards as the Arrest Warrant flow.
 **Subpoena** Form responses use the same private-ticket, claim, judicial approval/denial, one-page
 PNG, and FiveManage delivery path through `/generate-subpoena`, `/approve-subpoena`, and
 `/deny-subpoena`. The template supports up to three listed subjects and fills the exact
-`{{SUBJECT_n_DATE}}`, `{{SUBJECT_n_WARRANT_TYPE}}`, and `{{SUBPOENA_DETAILS}}` fields used by the
+`{{SUBJECT_n_DATE}}`, `{{SUBJECT_n_SUBPOENA_TYPE}}`, and `{{SUBPOENA_DETAILS}}` fields used by the
 native Google Doc.
 
 When `FIVEMANAGE_API_TOKEN` is configured only in protected host settings, the bot also uploads
