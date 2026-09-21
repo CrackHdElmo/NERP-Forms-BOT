@@ -129,6 +129,12 @@ The same guarded workflow is available for **Search or Seizure Warrant** Form re
 Citizen ID, Date of Incident, and selected Search/Seizure type, and applies the same one-page PNG
 and later-approval safeguards as the Arrest Warrant flow.
 
+**Subpoena** Form responses use the same private-ticket, claim, judicial approval/denial, one-page
+PNG, and FiveManage delivery path through `/generate-subpoena`, `/approve-subpoena`, and
+`/deny-subpoena`. The template supports up to three listed subjects and fills the exact
+`{{SUBJECT_n_DATE}}`, `{{SUBJECT_n_WARRANT_TYPE}}`, and `{{SUBPOENA_DETAILS}}` fields used by the
+native Google Doc.
+
 When `FIVEMANAGE_API_TOKEN` is configured only in protected host settings, the bot also uploads
 the approved PNG to FiveManage and posts its returned CDN URL alongside the attached PNG. A
 FiveManage failure never prevents the verified PNG from being posted to the private ticket.

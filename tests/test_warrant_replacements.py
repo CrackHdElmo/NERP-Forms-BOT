@@ -154,7 +154,7 @@ def test_search_seizure_warrant_is_a_supported_court_order_workflow() -> None:
     assert bot._has_dedicated_court_order_workflow(
         _submission({"Request Type": "Search or Seizure Warrant"})
     )
-    assert not bot._has_dedicated_court_order_workflow(
+    assert bot._has_dedicated_court_order_workflow(
         _submission({"Request Type": "Subpoena"})
     )
 
@@ -201,6 +201,44 @@ def test_search_seizure_replacements_reject_more_than_three_subjects() -> None:
     _, error = _bot()._search_seizure_warrant_replacements(submission=_submission(payload))
 
     assert error == "the request contains more than the supported three subjects"
+
+
+def test_subpoena_replacements_match_the_live_template_placeholders() -> None:
+    payload = {
+        "Request Type": "Subpoena",
+        "Requestors Name:": "Officer Example",
+        "Requesting Agency:": "LSPD",
+        "Subject Name of Subpoena:": "Records Custodian",
+        "Subject Name of Subpoena: (2)": "Witness Example",
+        "Subject Citizen ID:": "1001",
+        "Subject Citizen ID: (2)": "1002",
+        "Date to Produce Materials By or Appear:": "September 25, 2026",
+        "Date to Produce Materials By or Appear By: (2)": "September 26, 2026",
+        "Purpose of Subpoena:": "Produce records",
+        "Purpose of Subpoena: (2)": "Appear to testify",
+        "Subpoena Details as It Will Appear on The Order:": "Produce the requested records.",
+        "Subpoena Details as It Will Appear on The Order: (2)": "Appear before the Court.",
+    }
+
+    replacements, error = _bot()._subpoena_replacements(submission=_submission(payload))
+
+    assert error is None
+    assert replacements["{{SUBJECT_1_NAME}}"] == "Records Custodian"
+    assert replacements["{{SUBJECT_2_NAME}}"] == "Witness Example"
+    assert replacements["{{SUBJECT_1_DATE}}"] == "September 25, 2026"
+    assert replacements["{{SUBJECT_2_DATE}}"] == "September 26, 2026"
+    assert replacements["{{SUBJECT_1_WARRANT_TYPE}}"] == "Produce records"
+    assert replacements["{{SUBJECT_3_NAME}}"] == "N/A"
+    assert replacements["{{SUBPOENA_DETAILS}}"] == (
+        "Produce the requested records.\n\nAppear before the Court."
+    )
+
+
+def test_subpoena_is_a_supported_court_order_workflow() -> None:
+    bot = _bot()
+
+    assert bot._is_subpoena(_submission({"Request Type": "Subpoena"}))
+    assert bot._has_dedicated_court_order_workflow(_submission({"Request Type": "Subpoena"}))
 
 
 def test_refresh_court_order_reloads_the_original_form_row(tmp_path: Path) -> None:

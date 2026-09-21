@@ -34,6 +34,11 @@ court_order_search_seizure_warrant:
   template_document_id: 12wCoKHco_ZVoxR5CMXXS0KbB_BUG3J7ptCBeAnNqUjo
   output_drive_folder_id: 1tSB26NtY7wX5I0yRhUfVrRXj0B3ADItb
 
+court_order_subpoena:
+  # Native Google Doc template for the Subpoena workflow.
+  template_document_id: 1THwoRNPiilsi2AjGY9gAWO3tigfSy_Xj__qstRuNeIo
+  output_drive_folder_id: 1tSB26NtY7wX5I0yRhUfVrRXj0B3ADItb
+
 roles:
   administrators:
     - 1414109505805094938 # Mod (test server)

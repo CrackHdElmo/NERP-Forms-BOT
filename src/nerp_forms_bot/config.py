@@ -60,6 +60,15 @@ class CourtOrderSearchSeizureWarrantConfig(BaseModel):
     output_drive_folder_id: str
 
 
+class CourtOrderSubpoenaConfig(BaseModel):
+    """Google Docs resources used for Subpoena generation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    template_document_id: str
+    output_drive_folder_id: str
+
+
 class EnvironmentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -73,6 +82,7 @@ class EnvironmentConfig(BaseModel):
     court_order_intake: CourtOrderIntakeConfig | None = None
     court_order_warrant: CourtOrderWarrantConfig | None = None
     court_order_search_seizure_warrant: CourtOrderSearchSeizureWarrantConfig | None = None
+    court_order_subpoena: CourtOrderSubpoenaConfig | None = None
     test_requester_user_id: int | None = None
 
 

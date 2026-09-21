@@ -5,7 +5,7 @@ working **test** deployment of NERP Forms BOT. Complete the test workflow
 before configuring a live community.
 
 The currently implemented player-facing document workflows are the **Arrest
-Warrant** and **Search or Seizure Warrant** options within the Court Order Form.
+Warrant**, **Search or Seizure Warrant**, and **Subpoena** options within the Court Order Form.
 The expanded Court Order Form may receive other request types and the bot will
 preserve them in their private tickets, but it clearly identifies that their
 dedicated document-generation and judicial commands are not configured yet. The Discord setup wizard can also
@@ -241,8 +241,8 @@ rather than opening a duplicate private ticket.
 
 Use native **Google Docs**, not Word files, as the active templates. Share each
 template with the service account. Configure the Arrest Warrant under
-`court_order_warrant` and the Search / Seizure Warrant under
-`court_order_search_seizure_warrant`. Each config block needs its template
+`court_order_warrant`, the Search / Seizure Warrant under
+`court_order_search_seizure_warrant`, and the Subpoena under `court_order_subpoena`. Each config block needs its template
 document ID and the Shared Drive output-folder ID.
 
 The template uses the following exact placeholders:
@@ -379,6 +379,9 @@ environment when old Sheet rows must not create a flood of tickets.
 | `/generate-search-seizure-warrant` | Verified requester or bot administrator | Creates the one-page PNG Search / Seizure Warrant for the current claimed request |
 | `/approve-search-seizure-warrant` | Configured Judge or bot administrator | Electronically approves the Search / Seizure Warrant |
 | `/deny-search-seizure-warrant` | Configured Judge or bot administrator | Denies it with required notes; it can later be approved by an authorized reviewer |
+| `/generate-subpoena` | Verified requester or bot administrator | Creates the one-page PNG Subpoena for the current claimed request |
+| `/approve-subpoena` | Configured Judge or bot administrator | Electronically approves the Subpoena |
+| `/deny-subpoena` | Configured Judge or bot administrator | Denies it with required notes; it can later be approved by an authorized reviewer |
 | `/close-ticket` | Verified requester, Judge, Attorney General, or administrator | Posts staff record then closes/removes private ticket |
 
 ## Troubleshooting
