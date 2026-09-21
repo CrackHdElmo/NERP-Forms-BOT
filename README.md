@@ -1,6 +1,6 @@
-# NERP Forms BOT
+# NERP - Case Management
 
-NERP Forms BOT is a configuration-driven Discord workflow service for the New Era RP
+NERP - Case Management is a configuration-driven Discord workflow service for the New Era RP
 Department of Justice. It turns approved Google Form submissions into trackable Discord
 work items, maintains Google Sheets/Drive records, and supports role-verified DOJ actions.
 

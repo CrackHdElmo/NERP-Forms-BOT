@@ -1,7 +1,7 @@
 # First-time setup guide
 
 This guide takes a new administrator from an empty Discord application to a
-working **test** deployment of NERP Forms BOT. Complete the test workflow
+working **test** deployment of NERP - Case Management. Complete the test workflow
 before configuring a live community.
 
 The currently implemented player-facing document workflows are the **Arrest

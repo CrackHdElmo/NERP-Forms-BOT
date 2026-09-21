@@ -1,4 +1,4 @@
-# Wispbyte deployment: NERP Forms BOT
+# Wispbyte deployment: NERP - Case Management
 
 Use this guide for a **test bot** first. Do not deploy to a live server until the
 complete test workflow has passed. For the full Discord, Google, GitHub, and test

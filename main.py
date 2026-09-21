@@ -1,4 +1,4 @@
-"""Wispbyte-compatible launcher for NERP Forms BOT.
+"""Wispbyte-compatible launcher for NERP - Case Management.
 
 Wispbyte's Python server selector runs one file from the repository root.  The
 application itself remains in ``src/nerp_forms_bot`` so it can still be used as

@@ -1,1 +1,1 @@
-"""NERP Forms BOT package."""
+"""NERP - Case Management package."""

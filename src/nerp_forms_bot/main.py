@@ -1,4 +1,4 @@
-"""Discord process entry point for the NERP Forms BOT scaffold."""
+"""Discord process entry point for NERP - Case Management."""
 
 from __future__ import annotations
 
@@ -534,7 +534,7 @@ class NerpFormsBot(discord.Client):
             category = await guild.create_category(
                 name=name,
                 overwrites=overwrites,
-                reason="NERP Forms BOT guided setup",
+                reason="NERP - Case Management guided setup",
             )
             created = True
         await self.store.set_resource_channel_id(resource_key, category.id)
@@ -562,7 +562,7 @@ class NerpFormsBot(discord.Client):
                 category=category,
                 topic=topic,
                 overwrites=overwrites,
-                reason="NERP Forms BOT guided setup",
+                reason="NERP - Case Management guided setup",
             )
             created = True
         await self.store.set_resource_channel_id(resource_key, channel.id)
@@ -590,7 +590,7 @@ class NerpFormsBot(discord.Client):
                 category=category,
                 topic=topic,
                 overwrites=overwrites,
-                reason="NERP Forms BOT guided setup",
+                reason="NERP - Case Management guided setup",
             )
             created = True
         await self.store.set_resource_channel_id(resource_key, channel.id)
@@ -633,7 +633,7 @@ class NerpFormsBot(discord.Client):
                 configured_key="service_desk",
                 category=category,
                 name=plan.names["service_desk_channel"],
-                topic="NERP Forms BOT request directory and workflow information.",
+                topic="NERP - Case Management request directory and workflow information.",
                 overwrites=service_desk_overwrites,
             )
             results.append(("Read-only directory", service_desk, created))
@@ -653,7 +653,7 @@ class NerpFormsBot(discord.Client):
                 configured_key=None,
                 category=category,
                 name=plan.names["doj_case_records"],
-                topic="NERP Forms BOT permanent DOJ/PD case and request closure records.",
+                topic="NERP - Case Management permanent DOJ/PD case and request closure records.",
                 overwrites=self._staff_overwrites(guild, allow_messages=False),
             )
             results.append(("Staff records", records, created))
@@ -713,7 +713,7 @@ class NerpFormsBot(discord.Client):
 
         @self.tree.command(
             name="bot-status",
-            description="Show the current NERP Forms BOT environment.",
+            description="Show the current NERP - Case Management environment.",
             guild=guild,
         )
         async def bot_status(interaction: discord.Interaction) -> None:
@@ -725,7 +725,7 @@ class NerpFormsBot(discord.Client):
                 return
 
             await interaction.response.send_message(
-                f"NERP Forms BOT is connected to **{self.environment.guild.name}** "
+                f"NERP - Case Management is connected to **{self.environment.guild.name}** "
                 f"using the **{self.environment.environment}** configuration profile.",
                 ephemeral=True,
             )
@@ -951,7 +951,7 @@ class NerpFormsBot(discord.Client):
                 )
                 await channel.edit(
                     name=self._court_order_ticket_name(submission, interaction.user),
-                    reason=f"NERP Forms BOT verified claimant for {submission.request_id}",
+                    reason=f"NERP - Case Management verified claimant for {submission.request_id}",
                 )
                 await self.store.mark_claimed(submission.id, interaction.user.id)
                 if submission.tracker_spreadsheet_id and submission.tracker_row:
@@ -1354,7 +1354,7 @@ class NerpFormsBot(discord.Client):
             try:
                 await docket_thread.edit(
                     name=new_title,
-                    reason=f"NERP Forms BOT Docket rename by {interaction.user}",
+                    reason=f"NERP - Case Management Docket rename by {interaction.user}",
                 )
                 await docket_thread.send(
                     f"{interaction.user.mention} renamed this Docket from **{old_title}** to **{new_title}**."
@@ -2580,7 +2580,7 @@ class NerpFormsBot(discord.Client):
         thread_with_message = await forum.create_thread(
             name=thread_name,
             embed=self._docket_intake_embed(submission),
-            reason=f"NERP Forms BOT new Docket filing {submission.request_id}",
+            reason=f"NERP - Case Management new Docket filing {submission.request_id}",
         )
         thread = thread_with_message.thread
         await thread.send(embed=await self._case_assignment_embed(submission))
@@ -2909,9 +2909,9 @@ class NerpFormsBot(discord.Client):
         channel = await guild.create_text_channel(
             name="doj-case-records",
             category=category,
-            topic="NERP Forms BOT permanent DOJ/PD case and request closure records.",
+            topic="NERP - Case Management permanent DOJ/PD case and request closure records.",
             overwrites=overwrites,
-            reason="NERP Forms BOT first request closure",
+            reason="NERP - Case Management first request closure",
         )
         await self.store.set_resource_channel_id("doj_case_records", channel.id)
         return channel
@@ -3109,11 +3109,11 @@ class NerpFormsBot(discord.Client):
             await channel.edit(
                 archived=True,
                 locked=True,
-                reason=f"NERP Forms BOT closed request {submission.request_id}",
+                reason=f"NERP - Case Management closed request {submission.request_id}",
             )
             return
         await channel.delete(
-            reason=f"NERP Forms BOT closed request {submission.request_id}",
+            reason=f"NERP - Case Management closed request {submission.request_id}",
         )
 
     async def _create_court_order_ticket(self, submission: Submission) -> discord.TextChannel:
@@ -3154,7 +3154,7 @@ class NerpFormsBot(discord.Client):
             category=category,
             overwrites=overwrites,
             topic=f"Court Order request {submission.request_id}; awaiting claimant verification.",
-            reason=f"NERP Forms BOT Court Order intake {submission.request_id}",
+            reason=f"NERP - Case Management Court Order intake {submission.request_id}",
         )
         await self._post_court_order_intake(channel, submission)
         return channel

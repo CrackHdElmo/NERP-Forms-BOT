@@ -88,7 +88,7 @@ class SubmissionStore:
     def __init__(self, database_url: str) -> None:
         prefix = "sqlite+aiosqlite:///"
         if not database_url.startswith(prefix):
-            raise ValueError("The initial NERP Forms BOT tracker supports SQLite database URLs only.")
+            raise ValueError("The initial NERP - Case Management tracker supports SQLite database URLs only.")
         self.path = Path(database_url.removeprefix(prefix))
 
     async def initialize(self) -> None:
