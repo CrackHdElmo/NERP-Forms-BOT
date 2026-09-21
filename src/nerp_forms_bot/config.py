@@ -86,6 +86,15 @@ class EnvironmentConfig(BaseModel):
     test_requester_user_id: int | None = None
 
 
+class MasterDeploymentConfig(BaseModel):
+    """Private one-file deployment configuration used by the live bot source repository."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    runtime: dict[str, object]
+    environment: EnvironmentConfig
+
+
 def load_environment(name: str, config_root: Path | None = None) -> EnvironmentConfig:
     """Load one environment profile and reject malformed settings early."""
     root = config_root or Path(__file__).resolve().parents[2] / "config" / "environments"
@@ -96,3 +105,13 @@ def load_environment(name: str, config_root: Path | None = None) -> EnvironmentC
     with path.open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle)
     return EnvironmentConfig.model_validate(raw)
+
+
+def load_master_deployment(path: Path | None = None) -> MasterDeploymentConfig | None:
+    """Load the private all-in-one deployment file when a deployment repository provides it."""
+    master_path = path or Path.cwd() / "config" / "master.yaml"
+    if not master_path.is_file():
+        return None
+    with master_path.open("r", encoding="utf-8") as handle:
+        raw = yaml.safe_load(handle)
+    return MasterDeploymentConfig.model_validate(raw)

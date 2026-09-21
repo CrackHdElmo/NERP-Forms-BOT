@@ -14,7 +14,7 @@ import discord
 from discord import app_commands
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .config import EnvironmentConfig, load_environment
+from .config import EnvironmentConfig, load_environment, load_master_deployment
 from .fivemanage import FiveManageService
 from .google_workspace import GeneratedWarrant, GoogleWorkspaceService, TrackingRow
 from .submission_store import Submission, SubmissionStore
@@ -4116,8 +4116,13 @@ class NerpFormsBot(discord.Client):
 
 def run() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    settings = Settings()
-    config = load_environment(settings.nerp_environment)
+    master_deployment = load_master_deployment()
+    if master_deployment is not None:
+        settings = Settings.model_validate(master_deployment.runtime)
+        config = master_deployment.environment
+    else:
+        settings = Settings()
+        config = load_environment(settings.nerp_environment)
     NerpFormsBot(config, settings).run(settings.discord_token, log_handler=None)
 
 

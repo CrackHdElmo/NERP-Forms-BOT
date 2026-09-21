@@ -1,8 +1,22 @@
 # NERP - Case Management configuration map
 
-This is the root-level starting point for an administrator or developer preparing a new NERP - Case Management deployment. The bot intentionally does **not** keep every value in one executable file: Discord and Google resource IDs are safe to version in the project, while credentials must stay in protected host storage.
+This is the root-level starting point for an administrator or developer preparing a new NERP - Case Management deployment. The private deployment repository supports one authoritative file, `config/master.yaml`, for every runtime setting, token, server/resource ID, role mapping, and workflow option. The only exception is the Google service-account JSON file itself, which remains a host file and is referenced by its path in the master configuration.
 
-## Choose the environment profile
+The public source repository contains only [the blank master template](config/master.example.yaml). Never add the populated `config/master.yaml` to the public repository.
+
+## Private one-file deployment configuration
+
+In the private deployment repository, copy `config/master.example.yaml` to `config/master.yaml` and fill it once. When this file exists, the bot loads it instead of `.env` and `config/environments/<name>.yaml`.
+
+```text
+config/master.yaml
+├── runtime       tokens, database URL, Google credential-file path, FiveManage settings
+└── environment   Discord server, categories, channels, roles, Forms, Sheets, Drive, templates, workflows
+```
+
+The file is intentionally listed in `.gitignore` for the public source repository. The private deployment repository tracks its own populated copy so an approved source-control push can carry the complete deployment state to Wispbyte.
+
+## Legacy/profile-based configuration
 
 The active profile is selected by `NERP_ENVIRONMENT` in the protected runtime settings. It loads this file:
 
@@ -10,13 +24,13 @@ The active profile is selected by `NERP_ENVIRONMENT` in the protected runtime se
 config/environments/<NERP_ENVIRONMENT>.yaml
 ```
 
-Use `config/environments/test.yaml` as the working reference for the complete supported shape. For a new live server, copy `config/environments/production.example.yaml` to `config/environments/production.yaml`, replace every `null` or sample value with the live resource ID, then set `NERP_ENVIRONMENT=production` in Wispbyte.
+Use `config/environments/test.yaml` as the working reference for the complete supported shape only when the private master configuration is not present. For a profile-based deployment, copy `config/environments/production.example.yaml` to `config/environments/production.yaml`, replace every `null` or sample value with the live resource ID, then set `NERP_ENVIRONMENT=production` in Wispbyte.
 
 Do not commit `production.yaml` if it contains IDs or deployment details your organization treats as private. Git ignores ordinary `.env` secrets, but review every new file before pushing.
 
 ## What belongs in the environment YAML
 
-This is the main non-secret configuration file. Values in it take effect after the bot restarts.
+This is the main non-secret configuration file for the legacy/profile-based method. Values in it take effect after the bot restarts. In the private one-file method, the same sections sit beneath `environment:` in `config/master.yaml`.
 
 | YAML section | Configure here |
 | --- | --- |
@@ -53,7 +67,7 @@ Keep any additional organization-specific role mappings alongside them. The bot 
 
 ## Protected Wispbyte or local runtime settings
 
-Start from [`.env.example`](.env.example). In Wispbyte, add these as **protected environment variables** rather than making an uploaded `.env` file. Do not put them in YAML, GitHub, Discord, or screenshots.
+For the legacy/profile-based method, start from [`.env.example`](.env.example). In Wispbyte, add these as **protected environment variables** rather than making an uploaded `.env` file. In the private one-file method, these settings belong under `runtime:` in `config/master.yaml`; the Google service-account JSON remains outside Git and is referenced by `google_service_account_file`.
 
 | Setting | Required | Purpose |
 | --- | --- | --- |

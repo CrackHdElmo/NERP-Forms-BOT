@@ -1,0 +1,83 @@
+# Private deployment master configuration template.
+#
+# Copy this file to config/master.yaml ONLY in the private deployment repository.
+# That file is intentionally ignored by the public source repository. It is the one
+# configuration file loaded by the bot whenever it exists. Do not commit Google
+# service-account JSON itself; set GOOGLE_SERVICE_ACCOUNT_FILE to its Wispbyte path.
+
+runtime:
+  discord_token: REPLACE_WITH_DISCORD_BOT_TOKEN
+  database_url: sqlite+aiosqlite:///./data/nerp_forms_bot.db
+  google_service_account_file: /secure/path/to/google-service-account.json
+  google_forms_poll_interval_seconds: 60
+  fivemanage_api_token: REPLACE_WITH_OPTIONAL_FIVEMANAGE_TOKEN
+  fivemanage_storage_path: nerp-doj/court-orders
+
+environment:
+  environment: production
+  guild:
+    id: 0 # Replace with the Discord server ID.
+    name: New Era RP
+
+  channels:
+    service_desk: null
+    docket_forum: null
+    business_licensing_forum: null
+
+  categories:
+    court_administration: null
+    off_docket_tickets: null
+    attorney_request_tickets: null
+    corporate_office: null
+
+  roles:
+    administrators: []
+    judges: []
+    attorney_general: []
+    prosecutors: []
+    defense_attorneys: []
+    pd_officers: []
+    doj_command: []
+    pd_command: []
+
+  workflows:
+    new_docket:
+      destination: docket_forum
+      mode: forum_post
+      initial_status: pending_review
+    existing_docket_filing:
+      destination: docket_forum
+      mode: existing_forum_post
+      initial_status: pending_review
+    off_docket_request:
+      destination: off_docket_tickets
+      mode: private_ticket_channel
+      initial_status: pending_review
+    attorney_request:
+      destination: attorney_request_tickets
+      mode: private_ticket_channel
+      initial_status: unassigned
+    business_license:
+      destination: business_licensing_forum
+      mode: forum_post
+      initial_status: pending_review
+
+  google_workspace:
+    test_drive_folder_id: REPLACE_WITH_SHARED_DRIVE_FOLDER_ID
+
+  court_order_intake:
+    form_url: REPLACE_WITH_CASE_MANAGEMENT_FORM_URL
+    response_spreadsheet_id: REPLACE_WITH_RESPONSE_SPREADSHEET_ID
+    response_sheet_name: Form Responses 1
+
+  court_order_warrant:
+    template_document_id: REPLACE_WITH_ARREST_WARRANT_TEMPLATE_ID
+    output_drive_folder_id: REPLACE_WITH_OUTPUT_FOLDER_ID
+
+  court_order_search_seizure_warrant:
+    template_document_id: REPLACE_WITH_SEARCH_SEIZURE_TEMPLATE_ID
+    output_drive_folder_id: REPLACE_WITH_OUTPUT_FOLDER_ID
+
+  court_order_subpoena:
+    template_document_id: REPLACE_WITH_SUBPOENA_TEMPLATE_ID
+    output_drive_folder_id: REPLACE_WITH_OUTPUT_FOLDER_ID

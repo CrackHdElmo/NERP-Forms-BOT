@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from nerp_forms_bot.config import load_environment
+from nerp_forms_bot.config import load_environment, load_master_deployment
 
 
 def test_altitude_government_profile_loads() -> None:
@@ -21,3 +21,30 @@ def test_altitude_government_profile_loads() -> None:
         config.court_order_search_seizure_warrant.template_document_id
         == "12wCoKHco_ZVoxR5CMXXS0KbB_BUG3J7ptCBeAnNqUjo"
     )
+
+
+def test_private_master_deployment_loads_runtime_and_environment_once(tmp_path) -> None:
+    master_path = tmp_path / "master.yaml"
+    master_path.write_text(
+        """
+runtime:
+  discord_token: private-token
+  database_url: sqlite+aiosqlite:///./data/private.db
+environment:
+  environment: private-test
+  guild:
+    id: 42
+    name: Private Test Server
+  roles:
+    administrators: [7]
+""",
+        encoding="utf-8",
+    )
+
+    deployment = load_master_deployment(master_path)
+
+    assert deployment is not None
+    assert deployment.runtime["discord_token"] == "private-token"
+    assert deployment.environment.environment == "private-test"
+    assert deployment.environment.guild.id == 42
+    assert deployment.environment.roles["administrators"] == [7]

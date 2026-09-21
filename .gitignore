@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+config/master.yaml
 *.service-account.json
 secrets/
 

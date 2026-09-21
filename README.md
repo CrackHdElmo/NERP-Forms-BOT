@@ -18,6 +18,12 @@ It is the package copy of the service-desk-ready command reference for players a
 For a single administrator starting point that maps every safe YAML setting, protected host
 variable, and Discord-managed option, see [CONFIGURATION.md](CONFIGURATION.md).
 
+For the private deployment repository, copy `config/master.example.yaml` to
+`config/master.yaml`. That one private source-controlled file can hold the bot token, optional
+FiveManage token, runtime settings, Discord resource and role IDs, and all Google resource IDs.
+The Google service-account JSON file itself remains outside Git and is referenced only by its
+secured Wispbyte path. The public repository must retain only the blank example file.
+
 ## Initial Discord design
 
 | Workflow | Discord destination | Visibility model |
