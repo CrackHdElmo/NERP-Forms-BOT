@@ -57,6 +57,10 @@ the protected Google credential and creates (or finds) the test request tracker 
 shared Drive folder. `/court-order-sync` imports new Court Order Form response rows into
 staff-only off-docket tickets. A requester then runs `/claim-court-order`; the bot verifies
 their submitted Discord username through that interaction before granting ticket access.
+When an active ticket needs to be repaired after a Form or display issue, a configured
+administrator, Judge, or Attorney General can run `/refresh-court-order` in that ticket to
+reload its original Form response and post fresh intake and subject-detail embeds without
+creating a new request.
 The verified requester or a configured bot administrator can use `/add-ticket-member`
 inside any bot-managed private NERP request ticket to grant a selected server member permission
 to view, message, and attach files there; the bot posts an in-ticket audit message for each grant.

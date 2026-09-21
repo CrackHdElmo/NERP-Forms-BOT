@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -200,6 +201,53 @@ def test_search_seizure_replacements_reject_more_than_three_subjects() -> None:
     _, error = _bot()._search_seizure_warrant_replacements(submission=_submission(payload))
 
     assert error == "the request contains more than the supported three subjects"
+
+
+def test_refresh_court_order_reloads_the_original_form_row(tmp_path: Path) -> None:
+    async def exercise() -> tuple[Submission, Submission | None]:
+        root = Path(__file__).resolve().parents[1] / "config" / "environments"
+        bot = NerpFormsBot(
+            load_environment("test", root),
+            Settings(
+                discord_token="test-token",
+                google_service_account_file="service-account.json",
+                database_url=f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}",
+            ),
+        )
+        await bot.store.initialize()
+        intake = bot.environment.court_order_intake
+        assert intake is not None
+        original = await bot.store.begin_submission(
+            source_key=f"{intake.response_spreadsheet_id}:9",
+            workflow="court_order",
+            requester_username="old-requester",
+            payload={"Request Type": "Search or Seizure Warrant"},
+        )
+        assert original is not None
+
+        async def source_rows() -> tuple[None, list[dict[str, str]]]:
+            return (
+                None,
+                [
+                    {
+                        "_source_row": "9",
+                        "Discord Username": "refreshed-requester",
+                        "Request Type": "Search or Seizure Warrant",
+                        "Subject Name of Search or Seizure:": "Updated property",
+                    }
+                ],
+            )
+
+        bot._get_court_order_rows = source_rows  # type: ignore[method-assign]
+        return original, await bot._refresh_court_order_submission(original)
+
+    original, refreshed = asyncio.run(exercise())
+
+    assert refreshed is not None
+    assert refreshed.id == original.id
+    assert refreshed.request_id == original.request_id
+    assert refreshed.requester_username == "refreshed-requester"
+    assert refreshed.payload["Subject Name of Search or Seizure:"] == "Updated property"
 
 
 def test_setup_plan_uses_safe_resource_names_without_changing_category_case() -> None:

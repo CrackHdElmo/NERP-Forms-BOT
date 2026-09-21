@@ -209,6 +209,21 @@ class NerpFormsBot(discord.Client):
         """A judicial denial has the same authority boundary as a judicial approval."""
         return self._can_approve_warrant(interaction)
 
+    def _can_refresh_court_order(self, interaction: discord.Interaction) -> bool:
+        """Allow administrators, judicial staff, and the Attorney General to repair an active intake."""
+        member = interaction.user
+        if not isinstance(member, discord.Member):
+            return False
+        refresh_role_ids = self._role_ids(
+            "judges",
+            "judges_office",
+            "senior_judges",
+            "attorney_general",
+        )
+        return self._is_administrator(interaction) or any(
+            role.id in refresh_role_ids for role in member.roles
+        )
+
     def _role_ids(self, *role_groups: str) -> set[int]:
         """Resolve configured role groups while allowing test and production aliases."""
         return {
@@ -719,6 +734,64 @@ class NerpFormsBot(discord.Client):
                 await interaction.followup.send(
                     "No new Court Order Form submissions were found.", ephemeral=True
                 )
+
+        @self.tree.command(
+            name="refresh-court-order",
+            description="Refresh this active Court Order ticket from its original Google Form response.",
+            guild=guild,
+        )
+        async def refresh_court_order(interaction: discord.Interaction) -> None:
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.response.send_message(
+                    "Run this command inside the active private Court Order ticket to refresh.",
+                    ephemeral=True,
+                )
+                return
+            if not self._can_refresh_court_order(interaction):
+                await interaction.response.send_message(
+                    "Only a configured bot administrator, Judge, or Attorney General can refresh a Court Order ticket.",
+                    ephemeral=True,
+                )
+                return
+            submission = await self.store.get_by_channel_id(interaction.channel.id)
+            if not submission or submission.workflow != "court_order":
+                await interaction.response.send_message(
+                    "This channel is not an active Court Order request ticket.", ephemeral=True
+                )
+                return
+            if submission.status == "closed":
+                await interaction.response.send_message(
+                    "Closed requests cannot be refreshed because their case record is already finalized.",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                refreshed = await self._refresh_court_order_submission(submission)
+            except Exception:
+                LOGGER.exception("Court Order ticket refresh failed for %s", submission.request_id)
+                await interaction.followup.send(
+                    "The original Form response could not be refreshed. Check the Wispbyte console for the safe diagnostic message.",
+                    ephemeral=True,
+                )
+                return
+            if not refreshed:
+                await interaction.followup.send(
+                    "The original Form response for this ticket could not be found. No ticket data was changed.",
+                    ephemeral=True,
+                )
+                return
+
+            await self._post_court_order_intake(
+                interaction.channel,
+                refreshed,
+                refreshed=True,
+            )
+            await interaction.followup.send(
+                f"Refreshed **{refreshed.request_id}** from its original Form response and posted a new intake record in this ticket.",
+                ephemeral=True,
+            )
 
         @self.tree.command(
             name="court-order-baseline",
@@ -1776,6 +1849,37 @@ class NerpFormsBot(discord.Client):
                 marked += 1
         return marked
 
+    async def _refresh_court_order_submission(self, submission: Submission) -> Submission | None:
+        """Reload one active ticket from its original Form row without issuing a second request ID."""
+        intake = self.environment.court_order_intake
+        if not intake or not self.settings.google_service_account_file:
+            raise RuntimeError("Court Order Form intake is not configured on this host.")
+        _, rows = await self._get_court_order_rows()
+        source_row = next(
+            (
+                row
+                for row in rows
+                if f"{intake.response_spreadsheet_id}:{row['_source_row']}" == submission.source_key
+            ),
+            None,
+        )
+        if not source_row:
+            return None
+        username = self._normalize_username(
+            self._answer(source_row, "Discord Username", "Your Discord Name")
+        )
+        if not username:
+            raise RuntimeError("The original Form response does not include a Discord username.")
+        refreshed = await self.store.refresh_active_submission_payload(
+            source_key=submission.source_key,
+            workflow="court_order",
+            requester_username=username,
+            payload=source_row,
+        )
+        if not refreshed:
+            return None
+        return await self.store.get_by_request_id(submission.request_id)
+
     async def _get_court_order_rows(self) -> tuple[GoogleWorkspaceService, list[dict[str, str]]]:
         intake = self.environment.court_order_intake
         if not intake or not self.settings.google_service_account_file:
@@ -2104,6 +2208,7 @@ class NerpFormsBot(discord.Client):
         submission: Submission,
         *,
         existing_reference: str | None = None,
+        refreshed: bool = False,
     ) -> None:
         """Post one complete Court Order intake to either a new or existing private ticket."""
         if existing_reference:
@@ -2114,8 +2219,17 @@ class NerpFormsBot(discord.Client):
                 "`/claim-court-order` before it can be generated or approved."
             )
         embed = discord.Embed(
-            title=f"Court Order Request {submission.request_id}",
-            description="Awaiting requester verification through `/claim-court-order`.",
+            title=(
+                f"Refreshed Court Order Request {submission.request_id}"
+                if refreshed
+                else f"Court Order Request {submission.request_id}"
+            ),
+            description=(
+                "Reloaded from the original Google Form response by authorized staff. "
+                "This ticket's active Form data has been updated."
+                if refreshed
+                else "Awaiting requester verification through `/claim-court-order`."
+            ),
             color=discord.Color.dark_blue(),
         )
         for label, field in (

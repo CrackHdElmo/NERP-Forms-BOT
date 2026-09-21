@@ -366,6 +366,7 @@ environment when old Sheet rows must not create a flood of tickets.
 | `/bot-status` | Server members | Confirms active bot/environment connection |
 | `/google-workspace-status` | Configured bot administrator | Verifies protected Google setup and tracker access |
 | `/court-order-sync` | Configured bot administrator | Immediately import unprocessed Form responses |
+| `/refresh-court-order` | Configured administrator, Judge, or Attorney General | Reloads the active ticket from its original Form response and posts refreshed intake and subject embeds without changing its request ID |
 | `/claim-court-order` | Matching requester | Claims the request in its own ticket; no numeric Discord user ID required |
 | `/add-ticket-member` | Verified requester or bot administrator | Grants one server member access to the current private bot ticket |
 | `/generate-arrest-warrant` | Verified requester or bot administrator | Creates the one-page PNG warrant for the current claimed request |
@@ -386,6 +387,7 @@ environment when old Sheet rows must not create a flood of tickets.
 | Google verification fails | Service account key path, all three enabled Google APIs, and service-account sharing on the Sheet, template, and Shared Drive folder |
 | Drive reports storage quota exceeded | Use a Shared Drive and give the service account proper membership; service accounts should not be used as personal Drive storage |
 | Form response has not appeared | Verify the correct response Sheet ID/tab name, wait 60–120 seconds, or use `/court-order-sync` as an administrator |
+| Ticket details are incomplete or stale | An authorized administrator, Judge, or Attorney General can use `/refresh-court-order` in the active ticket to reload the original Form response and repost the current details |
 | Requester cannot claim | The Discord username submitted on the Form must match their current server username; correct and resubmit if it does not |
 | Warrant generation fails | Check template placeholders, Google Docs API access, document sharing, three-subject/character limits, and one-page layout |
 | FiveManage URL is absent | Treat it as optional; verify the protected token and storage path while confirming the Discord PNG was still created |
