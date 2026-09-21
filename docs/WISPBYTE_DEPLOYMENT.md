@@ -1,22 +1,16 @@
 # Wispbyte deployment: NERP Forms BOT
 
-Use this guide for the **Altitude Government test bot** first. Do not deploy to the
-live NERP DOJ server until the complete test workflow has passed.
+Use this guide for a **test bot** first. Do not deploy to a live server until the
+complete test workflow has passed. For the full Discord, Google, GitHub, and test
+workflow walkthrough, start with the [first-time setup guide](FIRST_TIME_SETUP.md).
 
 ## 1. Prepare the Wispbyte server
 
 In the Wispbyte panel, select a current **Python 3.12** image or newer. This project
-does not need an inbound web port for its Discord Gateway connection.
-
-Upload the project files, excluding `.venv/`, `.env`, `data/`, and `secrets/`. The
-upload must preserve the top-level layout:
-
-```text
-config/
-src/
-requirements.txt
-pyproject.toml
-```
+does not need an inbound web port for its Discord Gateway connection. Connect Wispbyte
+to the project's **private GitHub repository** and select the intended branch (normally
+`main`). Repository sync is the supported deployment path; do not repeatedly replace the
+server with manual ZIP uploads.
 
 ## 2. Configure startup
 
@@ -67,21 +61,25 @@ The bot must reply privately that it is connected to **Altitude Government** usi
 
 After the Google credential file and test Drive folder are configured, a test-role
 administrator can run `/google-workspace-status`. The command creates or finds the
-single `NERP Forms BOT - Test Requests` tracker and returns its Google Sheets link.
+single request tracker and returns its Google Sheets link.
+
+After every code/configuration push, first confirm Wispbyte synchronized the selected
+GitHub branch, then restart the server. The running process does not automatically load
+new source solely because it was pushed to GitHub.
 
 ## Troubleshooting
 
-- **Module not found:** confirm that the project was uploaded with `src/` intact, that
-  Python packages are installed, and that `PYTHONPATH=src` is set.
+- **Module not found:** confirm that Wispbyte synchronized the intended repository branch,
+  that Python packages are installed, and that the repository-root `main.py` is selected.
 - **Invalid token:** regenerate the token in the Discord Developer Portal, replace it
   only in Wispbyte's protected variable, and restart. Never paste it into chat.
 - **Bot starts but `/bot-status` is absent:** wait briefly for Discord to register the
   test-server command, then restart once. Confirm the bot is installed in Altitude
   Government and `NERP_ENVIRONMENT=test` is present.
 - **Permission error in a channel:** verify the bot's per-category/channel permissions;
-  it should not need Administrator. For `/claim-court-order`, its assigned Discord role
-  must have **Manage Roles** so it can add the verified requester to that private ticket.
-  Keep that bot role above any roles whose channel access it must manage.
+  it should not need Administrator. The guided setup and ticket workflows require
+  **Manage Channels**, **Manage Roles**, and **Manage Threads**. Keep the bot role above
+  any roles whose access it must manage.
 - **Form submission has not appeared yet:** the bot checks the linked response Sheet every
   60 seconds by default. An administrator can use `/court-order-sync` for an immediate
   retry, or set `GOOGLE_FORMS_POLL_INTERVAL_SECONDS=120` in Wispbyte Environment Variables

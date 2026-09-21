@@ -4,6 +4,14 @@ NERP Forms BOT is a configuration-driven Discord workflow service for the New Er
 Department of Justice. It turns approved Google Form submissions into trackable Discord
 work items, maintains Google Sheets/Drive records, and supports role-verified DOJ actions.
 
+## First-time installation and deployment
+
+For a complete from-zero walkthrough covering private GitHub source control, Discord bot
+creation and permissions, Google Cloud/service-account and Shared Drive setup, Wispbyte
+deployment, the guided Discord resource wizard, and an end-to-end Court Order test, follow
+[the first-time setup guide](docs/FIRST_TIME_SETUP.md). Keep that guide updated whenever the
+bot gains a workflow, command, permission, or hosting requirement.
+
 ## Initial Discord design
 
 | Workflow | Discord destination | Visibility model |
@@ -105,4 +113,6 @@ container-capable host. Supply environment variables through the host's protecte
 Do not bake credentials into the image, repository, or compose file. Wispbyte's Python
 main-file selector should use the repository-root `main.py` launcher.
 
-For Wispbyte's managed Python server image, follow [the Wispbyte deployment guide](docs/WISPBYTE_DEPLOYMENT.md).
+For Wispbyte's managed Python server image, follow [the Wispbyte deployment guide](docs/WISPBYTE_DEPLOYMENT.md),
+then use [the first-time setup guide](docs/FIRST_TIME_SETUP.md) for the full cross-service
+configuration and validation sequence.
