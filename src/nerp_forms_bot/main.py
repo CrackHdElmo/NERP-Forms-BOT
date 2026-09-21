@@ -191,6 +191,7 @@ class NerpFormsBot(discord.Client):
         self.settings = settings
         self.tree = app_commands.CommandTree(self)
         self.store = SubmissionStore(settings.database_url)
+        self._direct_bot_administrator_ids: set[int] = set()
         self._sync_lock = asyncio.Lock()
         self._court_order_poll_task: asyncio.Task[None] | None = None
 
@@ -201,6 +202,8 @@ class NerpFormsBot(discord.Client):
         if interaction.guild and interaction.guild.owner_id == member.id:
             return True
         if member.guild_permissions.administrator:
+            return True
+        if member.id in self._direct_bot_administrator_ids:
             return True
         administrator_role_ids = set(self.environment.roles.get("administrators", []))
         return any(role.id in administrator_role_ids for role in member.roles)
@@ -890,6 +893,7 @@ class NerpFormsBot(discord.Client):
 
     async def setup_hook(self) -> None:
         await self.store.initialize()
+        self._direct_bot_administrator_ids = await self.store.get_bot_admin_user_ids()
         guild = discord.Object(id=self.environment.guild.id)
         # Guild commands update immediately during development.  Clearing the scoped
         # tree first also replaces any stale command schema that Discord retained
@@ -931,6 +935,101 @@ class NerpFormsBot(discord.Client):
                 "nothing will be created until you confirm the plan.",
                 view=SetupPresetView(self),
                 ephemeral=True,
+            )
+
+        bot_admin = app_commands.Group(
+            name="bot-admin",
+            description="Manage direct NERP bot-administrator access.",
+        )
+        self.tree.add_command(bot_admin, guild=guild)
+
+        @bot_admin.command(
+            name="add",
+            description="Grant a server member direct NERP bot-administrator access.",
+        )
+        @app_commands.describe(member="The server member who should receive direct bot-admin access.")
+        async def bot_admin_add(
+            interaction: discord.Interaction, member: discord.Member
+        ) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only the server owner or an existing bot administrator can manage bot administrators.",
+                    ephemeral=True,
+                )
+                return
+            if member.bot:
+                await interaction.response.send_message(
+                    "Bot accounts cannot receive a direct bot-administrator grant.", ephemeral=True
+                )
+                return
+            added = await self.store.add_bot_administrator(
+                user_id=member.id,
+                user_name=member.display_name,
+                added_by_user_id=interaction.user.id,
+                added_by_name=interaction.user.display_name,
+                added_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
+            )
+            if not added:
+                await interaction.response.send_message(
+                    f"{member.mention} already has a direct bot-administrator grant.", ephemeral=True
+                )
+                return
+            self._direct_bot_administrator_ids.add(member.id)
+            await interaction.response.send_message(
+                f"Granted {member.mention} direct NERP bot-administrator access. "
+                "This private confirmation is also retained in the bot database.",
+                ephemeral=True,
+            )
+
+        @bot_admin.command(
+            name="remove",
+            description="Remove a server member's direct NERP bot-administrator access.",
+        )
+        @app_commands.describe(member="The server member whose direct bot-admin access should be removed.")
+        async def bot_admin_remove(
+            interaction: discord.Interaction, member: discord.Member
+        ) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only the server owner or an existing bot administrator can manage bot administrators.",
+                    ephemeral=True,
+                )
+                return
+            removed = await self.store.remove_bot_administrator(member.id)
+            if not removed:
+                await interaction.response.send_message(
+                    f"{member.mention} does not have a direct bot-administrator grant to remove.",
+                    ephemeral=True,
+                )
+                return
+            self._direct_bot_administrator_ids.discard(member.id)
+            await interaction.response.send_message(
+                f"Removed {member.mention}'s direct NERP bot-administrator grant. This does not remove "
+                "Discord server ownership, Discord Administrator permission, or access inherited from a configured administrator role.",
+                ephemeral=True,
+            )
+
+        @bot_admin.command(
+            name="list",
+            description="Privately list direct NERP bot-administrator grants.",
+        )
+        async def bot_admin_list(interaction: discord.Interaction) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only the server owner or an existing bot administrator can view bot administrators.",
+                    ephemeral=True,
+                )
+                return
+            grants = await self.store.list_bot_administrators()
+            if not grants:
+                await interaction.response.send_message(
+                    "There are no direct bot-administrator grants. Server owners, Discord Administrators, and configured administrator roles may still administer the bot.",
+                    ephemeral=True,
+                )
+                return
+            lines = [f"• <@{grant.user_id}> — added by **{grant.added_by_name}**" for grant in grants]
+            await interaction.response.send_message(
+                "**Direct NERP bot administrators**\n" + "\n".join(lines), ephemeral=True
             )
 
         service_desk = app_commands.Group(

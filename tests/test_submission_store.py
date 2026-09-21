@@ -75,6 +75,44 @@ def test_non_secret_bot_settings_persist_for_service_desk_configuration(tmp_path
     assert asyncio.run(exercise()) == '{"title": "Case Services"}'
 
 
+def test_direct_bot_administrators_are_persisted_and_can_be_removed(tmp_path) -> None:
+    async def exercise() -> tuple[bool, bool, set[int], object, bool, bool, set[int]]:
+        store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
+        await store.initialize()
+        first = await store.add_bot_administrator(
+            user_id=42,
+            user_name="Case Admin",
+            added_by_user_id=7,
+            added_by_name="Server Owner",
+            added_at="2026-09-21T12:00:00+00:00",
+        )
+        duplicate = await store.add_bot_administrator(
+            user_id=42,
+            user_name="Case Admin",
+            added_by_user_id=7,
+            added_by_name="Server Owner",
+            added_at="2026-09-21T12:00:01+00:00",
+        )
+        current = await store.get_bot_admin_user_ids()
+        grants = await store.list_bot_administrators()
+        removed = await store.remove_bot_administrator(42)
+        missing = await store.remove_bot_administrator(42)
+        remaining = await store.get_bot_admin_user_ids()
+        return first, duplicate, current, grants, removed, missing, remaining
+
+    first, duplicate, current, grants, removed, missing, remaining = asyncio.run(exercise())
+
+    assert first is True
+    assert duplicate is False
+    assert current == {42}
+    assert len(grants) == 1
+    assert grants[0].user_name == "Case Admin"
+    assert grants[0].added_by_name == "Server Owner"
+    assert removed is True
+    assert missing is False
+    assert remaining == set()
+
+
 def test_uncreated_failed_submission_can_be_requeued_without_new_request_id(tmp_path) -> None:
     async def exercise() -> tuple[bool, object]:
         store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")

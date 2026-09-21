@@ -1,0 +1,88 @@
+# NERP - Case Management configuration map
+
+This is the root-level starting point for an administrator or developer preparing a new NERP - Case Management deployment. The bot intentionally does **not** keep every value in one executable file: Discord and Google resource IDs are safe to version in the project, while credentials must stay in protected host storage.
+
+## Choose the environment profile
+
+The active profile is selected by `NERP_ENVIRONMENT` in the protected runtime settings. It loads this file:
+
+```text
+config/environments/<NERP_ENVIRONMENT>.yaml
+```
+
+Use `config/environments/test.yaml` as the working reference for the complete supported shape. For a new live server, copy `config/environments/production.example.yaml` to `config/environments/production.yaml`, replace every `null` or sample value with the live resource ID, then set `NERP_ENVIRONMENT=production` in Wispbyte.
+
+Do not commit `production.yaml` if it contains IDs or deployment details your organization treats as private. Git ignores ordinary `.env` secrets, but review every new file before pushing.
+
+## What belongs in the environment YAML
+
+This is the main non-secret configuration file. Values in it take effect after the bot restarts.
+
+| YAML section | Configure here |
+| --- | --- |
+| `environment` | Profile label shown by `/bot-status`, such as `test` or `production`. |
+| `guild` | Discord server ID and display name. |
+| `channels` | Existing Service Desk, Docket Forum, and Business Licensing Forum IDs. |
+| `categories` | Court Administration, Off-Docket, Attorney Requests, and Corporate Office category IDs. |
+| `roles` | Administrator, Judge, Attorney General, DOJ/PD Command, prosecutor, defense-attorney, PD-officer, and other workflow role IDs. A role list is used instead of a display name so permissions stay correct after a role is renamed. |
+| `workflows` | Destination key, Discord resource type, and first status for each intake workflow. |
+| `google_workspace` | Shared Drive folder ID used for tracking/workspace files. |
+| `court_order_intake` | Case Management System Form URL, response spreadsheet ID, and response-tab name. |
+| `court_order_warrant` | Arrest Warrant Google Doc template ID and generated-file destination folder ID. |
+| `court_order_search_seizure_warrant` | Search / Seizure template and output-folder IDs. |
+| `court_order_subpoena` | Subpoena template and output-folder IDs. |
+| `test_requester_user_id` | Optional test-only starter user ID. Omit it from a live profile unless it is deliberately needed. |
+
+### Minimum role mapping
+
+At a minimum, a live profile needs role-ID lists for these keys when their related features are used:
+
+```yaml
+roles:
+  administrators: []
+  judges: []
+  attorney_general: []
+  prosecutors: []
+  defense_attorneys: []
+  pd_officers: []
+  doj_command: []
+  pd_command: []
+```
+
+Keep any additional organization-specific role mappings alongside them. The bot never grants a Discord role; it only checks the server roles already assigned by your staff.
+
+## Protected Wispbyte or local runtime settings
+
+Start from [`.env.example`](.env.example). In Wispbyte, add these as **protected environment variables** rather than making an uploaded `.env` file. Do not put them in YAML, GitHub, Discord, or screenshots.
+
+| Setting | Required | Purpose |
+| --- | --- | --- |
+| `DISCORD_TOKEN` | Yes | Discord application bot token. |
+| `NERP_ENVIRONMENT` | Yes | Profile name, normally `test` or `production`. |
+| `DATABASE_URL` | Yes | Durable bot state: tickets, assignments, Service Desk configuration, and direct bot-admin grants. Back it up before major changes. |
+| `GOOGLE_SERVICE_ACCOUNT_FILE` | For Form/Drive workflows | Secure path to the Google service-account JSON file on the host. |
+| `GOOGLE_FORMS_POLL_INTERVAL_SECONDS` | No | Form polling interval; `60` is the default. |
+| `FIVEMANAGE_API_TOKEN` | No | Optional FiveManage upload token. |
+| `FIVEMANAGE_STORAGE_PATH` | No | Optional FiveManage folder/path for generated media. |
+
+## Items administrators can change without editing YAML
+
+These values are stored in the bot database and survive restarts. They are managed through Discord commands, so they should not be added to the YAML profile.
+
+| Item | Command |
+| --- | --- |
+| Server resource setup/registration | `/setup-workflow` |
+| Managed `#service-desk` title, image, directory copy, four form links, and four external links | `/service-desk` command group |
+| Individual, direct NERP bot administrators | `/bot-admin add`, `/bot-admin remove`, and `/bot-admin list` |
+
+Direct `/bot-admin` grants supplement — but do not replace — server ownership, Discord's native Administrator permission, and the YAML `roles.administrators` list. Removing a direct grant never strips any of those other privileges.
+
+## Safe change process
+
+1. Back up the runtime database before a major configuration or role change.
+2. Update the test profile first and validate `/bot-status`, `/google-workspace-status`, and the affected workflow.
+3. Make the matching live change in `production.yaml` and protected Wispbyte variables.
+4. Push the reviewed project change to GitHub, let Wispbyte synchronize the selected branch, then restart the bot once.
+5. Confirm the bot is online and that the updated slash command or workflow behaves correctly in the target server.
+
+For the full first deployment walkthrough, see [docs/FIRST_TIME_SETUP.md](docs/FIRST_TIME_SETUP.md). For a player and staff command guide, see [docs/BOT_REFERENCE_GUIDE.md](docs/BOT_REFERENCE_GUIDE.md).

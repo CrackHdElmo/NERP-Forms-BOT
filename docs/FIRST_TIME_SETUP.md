@@ -19,6 +19,9 @@ For the separate day-to-day command reference for players and staff, use
 [Bot Staff and Player Reference Guide](BOT_REFERENCE_GUIDE.md). Keep both documents aligned
 whenever a command, role boundary, or workflow changes.
 
+For the administrator-facing map of every editable environment value, protected host setting,
+and Discord-managed option, use the root [configuration map](../CONFIGURATION.md).
+
 ## Before you begin
 
 You need administrator access to:

@@ -17,6 +17,12 @@ categories:
   corporate_office: null
 
 roles:
+  # Populate these direct authorization lists before starting a live profile.
+  administrators: []
+  judges: []
+  pd_officers: []
+  doj_command: []
+  pd_command: []
   district_attorneys_office: [1547647738022465596]
   defense_attorneys: [1185753861403717693]
   chief_of_defense: [1284705608574177280]
@@ -32,11 +38,3 @@ roles:
   attorney_general: [1347743186612916294]
   business_owners: [1182075802809012316]
   registered_jurors: [1479660603172716659]
-
-# Explicit authorization groups will be finalized before deploying live.
-authorization:
-  administrators: [high_command_doj]
-  judicial_approvers: [judges_office, senior_judges]
-  prosecution_reviewers: [district_attorneys_office, assistant_district_attorneys, prosecutors, paralegals]
-  defense_reviewers: [defense_attorneys, chief_of_defense, paralegals]
-  officer_submitters: [lspd, lspd_high_command, lspd_chief]

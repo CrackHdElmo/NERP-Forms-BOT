@@ -82,6 +82,17 @@ class CourtOrderDocketMerge:
     source_closed: bool
 
 
+@dataclass(frozen=True)
+class BotAdministrator:
+    """One direct, durable bot-administrator grant made inside Discord."""
+
+    user_id: int
+    user_name: str
+    added_by_user_id: int
+    added_by_name: str
+    added_at: str
+
+
 class SubmissionStore:
     """Persist every source row before creating a Discord resource for it."""
 
@@ -173,6 +184,17 @@ class SubmissionStore:
                 CREATE TABLE IF NOT EXISTS bot_settings (
                     setting_key TEXT PRIMARY KEY,
                     setting_value TEXT NOT NULL
+                )
+                """
+            )
+            await database.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bot_administrators (
+                    user_id INTEGER PRIMARY KEY,
+                    user_name TEXT NOT NULL,
+                    added_by_user_id INTEGER NOT NULL,
+                    added_by_name TEXT NOT NULL,
+                    added_at TEXT NOT NULL
                 )
                 """
             )
@@ -562,6 +584,67 @@ class SubmissionStore:
                 (setting_key, setting_value),
             )
             await database.commit()
+
+    async def get_bot_admin_user_ids(self) -> set[int]:
+        """Return the direct bot-administrator grants stored by the server."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute("SELECT user_id FROM bot_administrators")
+            rows = await cursor.fetchall()
+        return {int(row[0]) for row in rows}
+
+    async def list_bot_administrators(self) -> list[BotAdministrator]:
+        """Return direct grants in their original assignment order for an admin-only review."""
+        async with aiosqlite.connect(self.path) as database:
+            database.row_factory = aiosqlite.Row
+            cursor = await database.execute(
+                """
+                SELECT user_id, user_name, added_by_user_id, added_by_name, added_at
+                FROM bot_administrators
+                ORDER BY added_at ASC, user_id ASC
+                """
+            )
+            rows = await cursor.fetchall()
+        return [
+            BotAdministrator(
+                user_id=row["user_id"],
+                user_name=row["user_name"],
+                added_by_user_id=row["added_by_user_id"],
+                added_by_name=row["added_by_name"],
+                added_at=row["added_at"],
+            )
+            for row in rows
+        ]
+
+    async def add_bot_administrator(
+        self,
+        *,
+        user_id: int,
+        user_name: str,
+        added_by_user_id: int,
+        added_by_name: str,
+        added_at: str,
+    ) -> bool:
+        """Grant direct bot administration once, retaining the assignment audit data."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute(
+                """
+                INSERT OR IGNORE INTO bot_administrators
+                (user_id, user_name, added_by_user_id, added_by_name, added_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, user_name, added_by_user_id, added_by_name, added_at),
+            )
+            await database.commit()
+        return cursor.rowcount == 1
+
+    async def remove_bot_administrator(self, user_id: int) -> bool:
+        """Remove only a direct bot-administrator grant, never Discord role privileges."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute(
+                "DELETE FROM bot_administrators WHERE user_id = ?", (user_id,)
+            )
+            await database.commit()
+        return cursor.rowcount == 1
 
     async def mark_closed(
         self,

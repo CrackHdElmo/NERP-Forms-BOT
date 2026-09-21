@@ -15,6 +15,9 @@ bot gains a workflow, command, permission, or hosting requirement.
 For day-to-day use, see the [Bot Staff and Player Reference Guide](docs/BOT_REFERENCE_GUIDE.md).
 It is the package copy of the service-desk-ready command reference for players and bot staff.
 
+For a single administrator starting point that maps every safe YAML setting, protected host
+variable, and Discord-managed option, see [CONFIGURATION.md](CONFIGURATION.md).
+
 ## Initial Discord design
 
 | Workflow | Discord destination | Visibility model |
@@ -36,6 +39,10 @@ Each docket is a post in the configured `docket` Forum Channel.
   It intentionally has no live server/category/channel IDs yet.
 - `.env` contains local or host-provided secrets and is ignored by Git. Start from
   `.env.example`; never send or commit its populated values.
+
+The root-level [configuration map](CONFIGURATION.md) explains exactly which values belong in
+each of those locations, what may be edited in Discord without a deployment, and the safe
+restart/validation process.
 
 ## Local setup
 

@@ -144,11 +144,29 @@ information, case notes, credentials, or private staff-only URLs in the public S
 | `/google-workspace-status` | Configured bot administrator | Confirms protected Google access and creates/fetches the test tracker when needed. |
 | `/court-order-sync` | Configured bot administrator | Immediately imports unprocessed Case Management System responses. Normal polling runs automatically. |
 | `/court-order-baseline` | Configured bot administrator | Marks existing Form responses as historical during initial setup so only later submissions become tickets. Use carefully. |
+| `/bot-admin add` | Server owner or existing bot administrator | Gives a selected server member a durable, direct NERP bot-administrator grant. |
+| `/bot-admin remove` | Server owner or existing bot administrator | Removes only that direct bot grant; it cannot remove server ownership, Discord Administrator permission, or a configured administrator role. |
+| `/bot-admin list` | Server owner or existing bot administrator | Privately lists all direct NERP bot-administrator grants and who added them. |
+
+### Bot administrator access
+
+There are three independent ways a person can administer the bot: server ownership, Discord's
+native **Administrator** permission, or a role listed under `roles.administrators` in the active
+environment profile. `/bot-admin add` creates a fourth, direct grant for a named member. It is
+useful when the person should manage the bot without receiving broad server-administrator power.
+
+Only the server owner or someone who already has bot-administrator access can use the
+`/bot-admin` command group. The direct grants are saved in the bot database and continue after a
+restart. Use `/bot-admin remove` when that extra access should end; it affects only the direct
+grant and deliberately cannot take away privileges supplied by Discord or a configured role.
+
+See the root [configuration map](../CONFIGURATION.md) for where all deployment options live,
+which values are protected secrets, and which options can be changed through Discord commands.
 
 ## Permissions and troubleshooting
 
-- Bot administrators are configured in the bot environment and may also be Discord server
-  administrators.
+- Bot administrators may be configured in the active environment, granted directly through
+  `/bot-admin`, or be Discord server administrators/owners.
 - Judges, Attorney General, DOJ/PD Command, prosecutors, defense attorneys, and PD Officers need
   the server roles configured for their corresponding workflows.
 - The bot needs Discord permissions appropriate to its work: View Channel, Send Messages, Read
