@@ -186,3 +186,57 @@ def test_open_submission_lookup_excludes_closed_requests(tmp_path) -> None:
         return [item.request_id for item in await store.find_open_submissions("court_order")]
 
     assert asyncio.run(exercise()) == ["COR-000001"]
+
+
+def test_form_refresh_updates_an_active_ticket_but_preserves_closed_case_data(tmp_path) -> None:
+    async def exercise() -> tuple[bool, bool, object, object]:
+        store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
+        await store.initialize()
+        active = await store.begin_submission(
+            source_key="sheet:7",
+            workflow="court_order",
+            requester_username="requester",
+            payload={"Subject Name of Search or Seizure:": "Missing before refresh"},
+        )
+        closed = await store.begin_submission(
+            source_key="sheet:8",
+            workflow="court_order",
+            requester_username="requester",
+            payload={"Request Type": "Arrest Warrant"},
+        )
+        assert active and closed
+        await store.mark_closed(
+            submission_id=closed.id,
+            closer_user_id=42,
+            closer_name="Administrator",
+            closed_at="2026-09-20T15:00:00+00:00",
+            closed_note=None,
+        )
+        refreshed_active = await store.refresh_active_submission_payload(
+            source_key=active.source_key,
+            workflow="court_order",
+            requester_username="updated-requester",
+            payload={"Subject Name of Search or Seizure:": "Current form value"},
+        )
+        refreshed_closed = await store.refresh_active_submission_payload(
+            source_key=closed.source_key,
+            workflow="court_order",
+            requester_username="updated-requester",
+            payload={"Request Type": "Changed"},
+        )
+        return (
+            refreshed_active,
+            refreshed_closed,
+            await store.get_by_request_id(active.request_id),
+            await store.get_by_request_id(closed.request_id),
+        )
+
+    refreshed_active, refreshed_closed, active, closed = asyncio.run(exercise())
+
+    assert refreshed_active is True
+    assert refreshed_closed is False
+    assert active is not None
+    assert active.requester_username == "updated-requester"
+    assert active.payload["Subject Name of Search or Seizure:"] == "Current form value"
+    assert closed is not None
+    assert closed.payload == {"Request Type": "Arrest Warrant"}

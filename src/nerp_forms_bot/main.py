@@ -1707,6 +1707,12 @@ class NerpFormsBot(discord.Client):
                 payload=row,
             )
             if not submission:
+                await self.store.refresh_active_submission_payload(
+                    source_key=source_key,
+                    workflow="court_order",
+                    requester_username=username,
+                    payload=row,
+                )
                 continue
             try:
                 reference = self._existing_docket_reference(row)

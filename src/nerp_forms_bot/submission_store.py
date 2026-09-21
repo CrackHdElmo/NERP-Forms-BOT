@@ -195,6 +195,32 @@ class SubmissionStore:
             )
             await database.commit()
 
+    async def refresh_active_submission_payload(
+        self,
+        *,
+        source_key: str,
+        workflow: str,
+        requester_username: str,
+        payload: dict[str, str],
+    ) -> bool:
+        """Refresh an open ticket's Form data without creating a second request or altering closure records."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute(
+                """
+                UPDATE submissions
+                SET requester_username = ?, payload_json = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE source_key = ? AND workflow = ? AND status != 'closed'
+                """,
+                (
+                    requester_username,
+                    json.dumps(payload, sort_keys=True),
+                    source_key,
+                    workflow,
+                ),
+            )
+            await database.commit()
+        return cursor.rowcount == 1
+
     async def find_claimable(self, workflow: str, requester_username: str) -> list[Submission]:
         async with aiosqlite.connect(self.path) as database:
             database.row_factory = aiosqlite.Row

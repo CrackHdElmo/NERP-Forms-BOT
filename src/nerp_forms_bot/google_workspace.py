@@ -155,7 +155,9 @@ class GoogleWorkspaceService:
         sheets = self._sheets_service()
         response = sheets.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id,
-            range=f"'{sheet_name}'!A:BB",
+            # Google Forms appends a column for each conditional section. The Court Order Form
+            # now extends well beyond BB, so read a deliberately roomy bounded response range.
+            range=f"'{sheet_name}'!A:ZZ",
         ).execute()
         values = response.get("values", [])
         if not values:
