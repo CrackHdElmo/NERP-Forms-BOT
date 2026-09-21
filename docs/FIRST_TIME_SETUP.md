@@ -4,11 +4,15 @@ This guide takes a new administrator from an empty Discord application to a
 working **test** deployment of NERP Forms BOT. Complete the test workflow
 before configuring a live community.
 
-The currently implemented intake is the **Court Order / Arrest Warrant**
-workflow. The Discord setup wizard can also create and register the base
-resources for Dockets, Attorney Requests, and Business Licensing, but those
-additional form workflows should not be represented as automated until their
-individual intake and review rules have been configured and tested.
+The currently implemented player-facing document workflow is the **Arrest
+Warrant** option within the Court Order Form. The expanded Court Order Form may
+receive other request types and the bot will preserve them in their private
+tickets, but it clearly identifies that their dedicated document-generation and
+judicial commands are not configured yet. The Discord setup wizard can also
+create and register the base resources for Dockets, Attorney Requests, and
+Business Licensing, but those additional form workflows should not be
+represented as automated until their individual intake and review rules have
+been configured and tested.
 
 ## Before you begin
 

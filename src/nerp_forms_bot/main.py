@@ -998,6 +998,14 @@ class NerpFormsBot(discord.Client):
                     "That Court Order request could not be found.", ephemeral=True
                 )
                 return
+            if not self._is_arrest_warrant(submission):
+                await interaction.response.send_message(
+                    "This request is not an Arrest Warrant. Its selected Court Order type is "
+                    f"**{self._request_type(submission) or 'not recognized'}**; player-facing "
+                    "document automation for that type has not been configured yet.",
+                    ephemeral=True,
+                )
+                return
             if interaction.channel_id != submission.discord_channel_id:
                 await interaction.response.send_message(
                     "Run this command inside the private ticket for that Court Order request.",
@@ -1128,6 +1136,13 @@ class NerpFormsBot(discord.Client):
             if not submission or submission.workflow != "court_order":
                 await interaction.response.send_message(
                     "This channel is not a Court Order request ticket.", ephemeral=True
+                )
+                return
+            if not self._is_arrest_warrant(submission):
+                await interaction.response.send_message(
+                    "This request is not an Arrest Warrant, so it cannot use the Arrest Warrant "
+                    "approval command. Its document workflow has not been configured yet.",
+                    ephemeral=True,
                 )
                 return
             if not submission.claimed_user_id:
@@ -1264,6 +1279,13 @@ class NerpFormsBot(discord.Client):
             if not submission or submission.workflow != "court_order":
                 await interaction.response.send_message(
                     "This channel is not a Court Order request ticket.", ephemeral=True
+                )
+                return
+            if not self._is_arrest_warrant(submission):
+                await interaction.response.send_message(
+                    "This request is not an Arrest Warrant, so it cannot use the Arrest Warrant "
+                    "denial command. Its document workflow has not been configured yet.",
+                    ephemeral=True,
                 )
                 return
             if submission.status == "closed":
@@ -1729,6 +1751,13 @@ class NerpFormsBot(discord.Client):
             if value:
                 embed.add_field(name=label, value=value[:1024], inline=False)
         await channel.send(embed=embed)
+        if not self._is_arrest_warrant(submission):
+            await channel.send(
+                f"**{self._request_type(submission) or 'This Court Order type'}** was received and "
+                "recorded in this private ticket. Its dedicated document-generation and judicial "
+                "commands are not configured yet; only the Arrest Warrant workflow is automated "
+                "at this time."
+            )
         for number, details in enumerate(self._court_order_subject_details(submission.payload), start=1):
             for part, chunk in enumerate(self._discord_text_chunks(details), start=1):
                 suffix = f" (continued {part})" if part > 1 else ""
@@ -1801,8 +1830,18 @@ class NerpFormsBot(discord.Client):
         )
 
     @staticmethod
-    def _answers_for_prefix(payload: dict[str, str], prefix: str) -> list[str]:
-        return [value for name, value in payload.items() if name.startswith(prefix) and value]
+    def _normalized_question_header(value: str) -> str:
+        """Treat cosmetic whitespace changes in Google Forms headings as equivalent."""
+        return re.sub(r"\s+", " ", value.replace("\u00a0", " ")).strip()
+
+    @classmethod
+    def _answers_for_prefix(cls, payload: dict[str, str], prefix: str) -> list[str]:
+        normalized_prefix = cls._normalized_question_header(prefix)
+        return [
+            value
+            for name, value in payload.items()
+            if cls._normalized_question_header(name).startswith(normalized_prefix) and value
+        ]
 
     @staticmethod
     def _value_at(values: list[str], index: int) -> str:
@@ -1843,6 +1882,12 @@ class NerpFormsBot(discord.Client):
     def _normalize_username(value: str) -> str:
         return re.sub(r"^@", "", value.strip()).lower()
 
+    def _request_type(self, submission: Submission) -> str:
+        return self._answer(submission.payload, "Request Type").strip()
+
+    def _is_arrest_warrant(self, submission: Submission) -> bool:
+        return self._request_type(submission).casefold() == "arrest warrant"
+
     @staticmethod
     def _answer(payload: dict[str, str], *names: str) -> str:
         for name in names:
@@ -1850,12 +1895,10 @@ class NerpFormsBot(discord.Client):
                 return payload[name]
         return ""
 
-    @staticmethod
-    def _answer_prefix(payload: dict[str, str], prefix: str) -> str:
-        for name, value in payload.items():
-            if name.startswith(prefix) and value:
-                return value
-        return ""
+    @classmethod
+    def _answer_prefix(cls, payload: dict[str, str], prefix: str) -> str:
+        values = cls._answers_for_prefix(payload, prefix)
+        return values[0] if values else ""
 
     async def on_ready(self) -> None:
         LOGGER.info("Connected as %s (%s)", self.user, self.user.id if self.user else "unknown")

@@ -114,6 +114,21 @@ def test_docket_or_off_docket_reference_accepts_the_updated_form_question() -> N
     assert _bot()._existing_docket_reference(payload) == "COR-000006"
 
 
+def test_docket_or_off_docket_reference_accepts_google_forms_nonbreaking_spaces() -> None:
+    payload = {
+        "Please indicate the\u00a0 Docket or Off-Docket Name/ID\u00a0 .": "COR-000007",
+    }
+
+    assert _bot()._existing_docket_reference(payload) == "COR-000007"
+
+
+def test_only_arrest_warrant_uses_arrest_warrant_commands() -> None:
+    bot = _bot()
+
+    assert bot._is_arrest_warrant(_submission({"Request Type": "Arrest Warrant"}))
+    assert not bot._is_arrest_warrant(_submission({"Request Type": "Search or Seizure Warrant"}))
+
+
 def test_setup_plan_uses_safe_resource_names_without_changing_category_case() -> None:
     plan = _bot()._default_setup_plan(
         "court_administration",

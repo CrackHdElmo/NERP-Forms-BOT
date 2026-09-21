@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -190,7 +191,9 @@ class GoogleWorkspaceService:
         request_type = self._answer(payload, "Request Type")
         timestamp = self._answer(payload, "Timestamp")
         requester_name = self._answer(payload, "Requestors Name:")
-        docket_id = self._answer(payload, "Please indicate the Docket Name/ID.")
+        docket_id = self._answer_prefix(
+            payload, "Please indicate the Docket or Off-Docket Name/ID"
+        ) or self._answer(payload, "Please indicate the Docket Name/ID.")
         destination = "Private Off-Docket ticket"
         row = [
             request_id, source_key, request_type, "Awaiting Claim", timestamp, requester_name,
@@ -318,4 +321,13 @@ class GoogleWorkspaceService:
         for name in names:
             if payload.get(name):
                 return payload[name]
+        return ""
+
+    @staticmethod
+    def _answer_prefix(payload: dict[str, str], prefix: str) -> str:
+        normalized_prefix = re.sub(r"\s+", " ", prefix.replace("\u00a0", " ")).strip()
+        for name, value in payload.items():
+            normalized_name = re.sub(r"\s+", " ", name.replace("\u00a0", " ")).strip()
+            if normalized_name.startswith(normalized_prefix) and value:
+                return value
         return ""
