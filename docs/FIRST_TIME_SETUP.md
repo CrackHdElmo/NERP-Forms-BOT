@@ -212,6 +212,22 @@ Each edit updates the same managed embed immediately. On first use the bot creat
 The bot cannot edit a message authored by a human or another app; leave that message in place or
 remove it manually, then let this workflow create and maintain its own directory post.
 
+### Configure staff assignment roles
+
+In the private deployment's `config/master.yaml`, the `environment.roles` section maps your
+server's existing Discord roles to the case-assignment functions. Role names are not fixed. For
+example, use the ID of your existing `LSPD`, `Sheriff`, `FIB`, or comparable law-enforcement role
+in `pd_officers`; the bot displays the assignment function as **PD Officer**, but does not require
+a Discord role with that exact name. Multiple role IDs may be listed:
+
+```yaml
+roles:
+  pd_officers: [123456789012345678, 234567890123456789]
+```
+
+With Discord Developer Mode enabled, right-click the role in **Server Settings → Roles** and use
+**Copy Role ID**. Save the configuration and restart the bot after changing any role IDs.
+
 If the wizard reports a permission issue, check the bot role's **Manage
 Channels**, **Manage Roles**, and **Manage Threads** permissions and its
 position in the Discord role list, then retry.

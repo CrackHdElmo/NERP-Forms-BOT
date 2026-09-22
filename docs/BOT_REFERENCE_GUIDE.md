@@ -98,7 +98,10 @@ open.
 
 Every active case, Docket, and Court Order may record up to two people in each of these roles:
 **Prosecutor**, **Judge**, **Defense Attorney**, and **PD Officer**. Empty positions appear as
-**Unassigned**. A person must hold the corresponding Discord role before they can be assigned.
+**Unassigned**. A person must hold a Discord role mapped to the corresponding assignment function
+before they can be assigned. In particular, `pd_officers` in the private `config/master.yaml` can
+contain your existing LSPD, Sheriff, FIB, or other law-enforcement role IDs; a role literally named
+“PD Officer” is not required.
 
 | Command | Who may use it | What it does |
 | --- | --- | --- |

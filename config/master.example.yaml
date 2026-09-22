@@ -42,6 +42,9 @@ environment:
     attorney_general: []
     prosecutors: []
     defense_attorneys: []
+    # One or more existing law-enforcement role IDs eligible to fill PD Officer
+    # case slots. The role itself does NOT need to be named "PD Officer".
+    # Example: pd_officers: [123456789012345678]
     pd_officers: []
     doj_command: []
     pd_command: []

@@ -273,7 +273,10 @@ class NerpFormsBot(discord.Client):
             ),
             "judge": ("judges", "judges_office", "senior_judges"),
             "defense_attorney": ("defense_attorneys", "chief_of_defense"),
-            "pd_officer": ("lspd", "lspd_high_command", "lspd_chief"),
+            # "pd_officers" is the deployment's supported, server-neutral
+            # setting.  The LSPD aliases remain available for legacy configs.
+            # Each group may contain one or more Discord role IDs.
+            "pd_officer": ("pd_officers", "lspd", "lspd_high_command", "lspd_chief"),
         }
         return self._role_ids(*groups.get(assignment_type, ()))
 
