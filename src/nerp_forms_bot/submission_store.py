@@ -494,8 +494,8 @@ class SubmissionStore:
         A Docket Forum post can contain one or more imported Court Orders.  The
         Docket itself must win when its thread is queried; otherwise actions
         such as closing the Docket can accidentally operate on an imported
-        Court Order.  The merge lookup remains as a fallback for Court Order
-        commands intentionally run from the linked Docket.
+        Court Order.  The merge lookup remains as a compatibility fallback for
+        a legacy linked Docket that does not have its own bot-managed record.
         """
         async with aiosqlite.connect(self.path) as database:
             database.row_factory = aiosqlite.Row
