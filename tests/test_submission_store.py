@@ -113,6 +113,43 @@ def test_direct_bot_administrators_are_persisted_and_can_be_removed(tmp_path) ->
     assert remaining == set()
 
 
+def test_discord_role_mappings_are_persisted_and_removable(tmp_path) -> None:
+    async def exercise() -> tuple[bool, bool, object, bool, bool, object]:
+        store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
+        await store.initialize()
+        first = await store.add_discord_role_mapping(
+            function_key="leo",
+            role_id=123,
+            added_by_user_id=7,
+            added_by_name="Server Owner",
+            added_at="2026-09-21T12:00:00+00:00",
+        )
+        duplicate = await store.add_discord_role_mapping(
+            function_key="leo",
+            role_id=123,
+            added_by_user_id=8,
+            added_by_name="Other Admin",
+            added_at="2026-09-21T12:01:00+00:00",
+        )
+        mappings = await store.list_discord_role_mappings()
+        removed = await store.remove_discord_role_mapping(function_key="leo", role_id=123)
+        missing = await store.remove_discord_role_mapping(function_key="leo", role_id=123)
+        remaining = await store.list_discord_role_mappings()
+        return first, duplicate, mappings, removed, missing, remaining
+
+    first, duplicate, mappings, removed, missing, remaining = asyncio.run(exercise())
+
+    assert first is True
+    assert duplicate is False
+    assert len(mappings) == 1
+    assert mappings[0].function_key == "leo"
+    assert mappings[0].role_id == 123
+    assert mappings[0].added_by_name == "Server Owner"
+    assert removed is True
+    assert missing is False
+    assert remaining == []
+
+
 def test_uncreated_failed_submission_can_be_requeued_without_new_request_id(tmp_path) -> None:
     async def exercise() -> tuple[bool, object]:
         store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")

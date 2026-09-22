@@ -93,6 +93,17 @@ class BotAdministrator:
     added_at: str
 
 
+@dataclass(frozen=True)
+class DiscordRoleMapping:
+    """One Discord role assigned to a durable NERP function category."""
+
+    function_key: str
+    role_id: int
+    added_by_user_id: int
+    added_by_name: str
+    added_at: str
+
+
 class SubmissionStore:
     """Persist every source row before creating a Discord resource for it."""
 
@@ -195,6 +206,18 @@ class SubmissionStore:
                     added_by_user_id INTEGER NOT NULL,
                     added_by_name TEXT NOT NULL,
                     added_at TEXT NOT NULL
+                )
+                """
+            )
+            await database.execute(
+                """
+                CREATE TABLE IF NOT EXISTS discord_role_mappings (
+                    function_key TEXT NOT NULL,
+                    role_id INTEGER NOT NULL,
+                    added_by_user_id INTEGER NOT NULL,
+                    added_by_name TEXT NOT NULL,
+                    added_at TEXT NOT NULL,
+                    PRIMARY KEY (function_key, role_id)
                 )
                 """
             )
@@ -642,6 +665,61 @@ class SubmissionStore:
         async with aiosqlite.connect(self.path) as database:
             cursor = await database.execute(
                 "DELETE FROM bot_administrators WHERE user_id = ?", (user_id,)
+            )
+            await database.commit()
+        return cursor.rowcount == 1
+
+    async def list_discord_role_mappings(self) -> list[DiscordRoleMapping]:
+        """Return all Discord-managed function-role mappings in a stable order."""
+        async with aiosqlite.connect(self.path) as database:
+            database.row_factory = aiosqlite.Row
+            cursor = await database.execute(
+                """
+                SELECT function_key, role_id, added_by_user_id, added_by_name, added_at
+                FROM discord_role_mappings
+                ORDER BY function_key ASC, added_at ASC, role_id ASC
+                """
+            )
+            rows = await cursor.fetchall()
+        return [
+            DiscordRoleMapping(
+                function_key=row["function_key"],
+                role_id=row["role_id"],
+                added_by_user_id=row["added_by_user_id"],
+                added_by_name=row["added_by_name"],
+                added_at=row["added_at"],
+            )
+            for row in rows
+        ]
+
+    async def add_discord_role_mapping(
+        self,
+        *,
+        function_key: str,
+        role_id: int,
+        added_by_user_id: int,
+        added_by_name: str,
+        added_at: str,
+    ) -> bool:
+        """Map one existing Discord role to a NERP function category once."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute(
+                """
+                INSERT OR IGNORE INTO discord_role_mappings
+                (function_key, role_id, added_by_user_id, added_by_name, added_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (function_key, role_id, added_by_user_id, added_by_name, added_at),
+            )
+            await database.commit()
+        return cursor.rowcount == 1
+
+    async def remove_discord_role_mapping(self, *, function_key: str, role_id: int) -> bool:
+        """Remove only a Discord-managed mapping, leaving config recovery roles intact."""
+        async with aiosqlite.connect(self.path) as database:
+            cursor = await database.execute(
+                "DELETE FROM discord_role_mappings WHERE function_key = ? AND role_id = ?",
+                (function_key, role_id),
             )
             await database.commit()
         return cursor.rowcount == 1

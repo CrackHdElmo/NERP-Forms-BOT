@@ -157,6 +157,18 @@ handoff for the selected slot, and the recipient must run `/accept-case-transfer
 ticket before that slot changes. The permanent closure record includes all final assignments and
 accepted transfers.
 
+## Discord-managed staff roles
+
+Bot administrators can manage ordinary staff permissions directly in Discord with `/role-mapping`.
+No role needs to use the same name as its NERP function: assign your existing LSPD, Sheriff, FIB,
+or other agency role to **LEO / PD Officer**, for example. The available function categories are
+**Bot Administrator**, **High Command**, **Attorney General**, **Judge**, **Prosecution**,
+**Defense Attorney**, and **LEO / PD Officer**. `/role-mapping add` and `/role-mapping remove`
+take effect immediately; `/role-mapping list` privately displays the active mappings.
+
+The private `config/master.yaml` role lists remain only as an emergency recovery fallback. They
+are not required for normal Discord role administration and cannot be removed by these commands.
+
 For a claimed Arrest Warrant request, a configured administrator can use
 `/generate-arrest-warrant` with the bot-issued request ID inside that request's private ticket.
 The verified requester and configured bot administrators can use it. The bot reads the submitted docket,

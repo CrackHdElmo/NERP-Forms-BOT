@@ -186,7 +186,10 @@ The initial presets are:
 | Business Licensing | `Corporate Office` category and `#business-licensing` Forum |
 
 Use the Court Administration and Off-Docket Court Orders presets for the
-current Court Order workflow. `#service-desk` is intentionally read-only. Active
+current Court Order workflow. After selecting a preset, the bot asks for every required category,
+channel, and Forum name before it shows the final preview. The recommended NERP names are already
+filled in; keep them or replace them with your own names. Nothing is created until you select
+**Confirm setup** on that preview. `#service-desk` is intentionally read-only. Active
 dockets are Forum posts in `#docket`; confidential court-order tickets are
 private text channels under Off-Docket Requests. A Forum post cannot be made
 visible to one individual only, so it is not suitable for confidential ticket
@@ -214,19 +217,20 @@ remove it manually, then let this workflow create and maintain its own directory
 
 ### Configure staff assignment roles
 
-In the private deployment's `config/master.yaml`, the `environment.roles` section maps your
-server's existing Discord roles to the case-assignment functions. Role names are not fixed. For
-example, use the ID of your existing `LSPD`, `Sheriff`, `FIB`, or comparable law-enforcement role
-in `pd_officers`; the bot displays the assignment function as **PD Officer**, but does not require
-a Discord role with that exact name. Multiple role IDs may be listed:
+After the bot is online, use Discord instead of editing configuration files to map staff roles.
+Run `/role-mapping add`, choose the NERP function, then select an existing Discord role from the
+normal role picker. The role name does not need to match the function name. For example, select
+your existing `LSPD`, `Sheriff`, `FIB`, or comparable agency role for **LEO / PD Officer**.
 
-```yaml
-roles:
-  pd_officers: [123456789012345678, 234567890123456789]
-```
+Configure the following functions as applicable: **Bot Administrator**, **High Command**,
+**Attorney General**, **Judge**, **Prosecution**, **Defense Attorney**, and **LEO / PD Officer**.
+Use `/role-mapping list` to review mappings and `/role-mapping remove` to remove an incorrect
+mapping. Changes are immediate and persist through restarts.
 
-With Discord Developer Mode enabled, right-click the role in **Server Settings → Roles** and use
-**Copy Role ID**. Save the configuration and restart the bot after changing any role IDs.
+The `environment.roles` section in the private `config/master.yaml` is now an emergency recovery
+fallback only. Keep at least one trusted administrator role there when initially deploying a new
+server, but normal staff role administration does not require copying Discord role IDs or editing
+that file.
 
 If the wizard reports a permission issue, check the bot role's **Manage
 Channels**, **Manage Roles**, and **Manage Threads** permissions and its

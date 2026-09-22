@@ -31,6 +31,38 @@ CASE_ASSIGNMENT_SLOTS = (1, 2)
 SERVICE_DESK_CONFIG_KEY = "service_desk_embed"
 SERVICE_DESK_MESSAGE_KEY = "service_desk_embed_message_id"
 
+# These are the only Discord-managed role categories. Their values are stored in the
+# local tracker database, so server staff can manage normal permissions without editing YAML.
+ROLE_MAPPING_LABELS = {
+    "bot_administrator": "Bot Administrator",
+    "high_command": "High Command",
+    "attorney_general": "Attorney General",
+    "judge": "Judge",
+    "prosecution": "Prosecution",
+    "defense_attorney": "Defense Attorney",
+    "leo": "LEO / PD Officer",
+}
+ROLE_MAPPING_CONFIG_GROUPS = {
+    "bot_administrator": ("administrators",),
+    "high_command": ("high_command_doj", "doj_command", "pd_command", "lspd_high_command", "lspd_chief"),
+    "attorney_general": ("attorney_general",),
+    "judge": ("judges", "judges_office", "senior_judges"),
+    "prosecution": ("prosecutors", "district_attorneys_office", "assistant_district_attorneys"),
+    "defense_attorney": ("defense_attorneys", "chief_of_defense"),
+    "leo": ("pd_officers", "lspd", "lspd_high_command", "lspd_chief"),
+}
+# Only canonical groups activate Discord-managed mappings. Legacy aliases above are intentionally
+# configuration-only fallbacks, so adding High Command does not accidentally grant LEO status.
+ROLE_MAPPING_RUNTIME_GROUPS = {
+    "bot_administrator": ("administrators",),
+    "high_command": ("high_command",),
+    "attorney_general": ("attorney_general",),
+    "judge": ("judges",),
+    "prosecution": ("prosecutors",),
+    "defense_attorney": ("defense_attorneys",),
+    "leo": ("pd_officers",),
+}
+
 
 class CourtOrderMergeError(Exception):
     """Raised when a requested Court Order-to-Docket merge cannot safely proceed."""
@@ -103,10 +135,9 @@ class SetupPresetView(discord.ui.View):
         selector = self.children[0]
         assert isinstance(selector, discord.ui.Select)
         plan = self.bot._default_setup_plan(selector.values[0])
-        await interaction.response.edit_message(
-            embed=self.bot._setup_preview_embed(plan),
-            view=SetupPlanView(self.bot, plan),
-        )
+        # Require the administrator to review the suggested category/channel/Forum names
+        # before they can reach the resource-creation confirmation.
+        await interaction.response.send_modal(SetupNamesModal(self.bot, plan))
 
 
 class SetupPlanView(discord.ui.View):
@@ -117,7 +148,7 @@ class SetupPlanView(discord.ui.View):
         self.bot = bot
         self.plan = plan
 
-    @discord.ui.button(label="Customize names", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Change names", style=discord.ButtonStyle.secondary)
     async def customize(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         if not self.bot._is_administrator(interaction):
             await interaction.response.send_message(
@@ -150,7 +181,12 @@ class SetupPlanView(discord.ui.View):
                 ephemeral=True,
             )
             return
-        await interaction.followup.send(result, ephemeral=True)
+        await interaction.followup.send(
+            result
+            + "\n\n**Next step:** use `/role-mapping add` to map your existing Discord staff roles "
+            "to Bot Administrator, High Command, judicial, counsel, and LEO functions.",
+            ephemeral=True,
+        )
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
@@ -197,6 +233,9 @@ class NerpFormsBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.store = SubmissionStore(settings.database_url)
         self._direct_bot_administrator_ids: set[int] = set()
+        self._managed_role_ids: dict[str, set[int]] = {
+            function_key: set() for function_key in ROLE_MAPPING_LABELS
+        }
         self._sync_lock = asyncio.Lock()
         self._court_order_poll_task: asyncio.Task[None] | None = None
 
@@ -210,7 +249,7 @@ class NerpFormsBot(discord.Client):
             return True
         if member.id in self._direct_bot_administrator_ids:
             return True
-        administrator_role_ids = set(self.environment.roles.get("administrators", []))
+        administrator_role_ids = self._role_ids("administrators")
         return any(role.id in administrator_role_ids for role in member.roles)
 
     def _can_approve_warrant(self, interaction: discord.Interaction) -> bool:
@@ -218,7 +257,7 @@ class NerpFormsBot(discord.Client):
         member = interaction.user
         if not isinstance(member, discord.Member):
             return False
-        judge_role_ids = set(self.environment.roles.get("judges", []))
+        judge_role_ids = self._role_ids("judges", "judges_office", "senior_judges")
         return self._is_administrator(interaction) or any(
             role.id in judge_role_ids for role in member.roles
         )
@@ -252,7 +291,10 @@ class NerpFormsBot(discord.Client):
         if not isinstance(member, discord.Member):
             return False
         management_role_ids = self._role_ids(
+            "high_command",
             "high_command_doj",
+            "doj_command",
+            "pd_command",
             "attorney_general",
             "district_attorneys_office",
             "lspd_high_command",
@@ -320,12 +362,30 @@ class NerpFormsBot(discord.Client):
         return embed
 
     def _role_ids(self, *role_groups: str) -> set[int]:
-        """Resolve configured role groups while allowing configured role aliases."""
-        return {
+        """Resolve Discord-managed roles with private config retained as recovery fallback."""
+        configured = {
             role_id
             for role_group in role_groups
             for role_id in self.environment.roles.get(role_group, [])
         }
+        managed_functions = {
+            function_key
+            for function_key, runtime_groups in ROLE_MAPPING_RUNTIME_GROUPS.items()
+            if set(role_groups).intersection(runtime_groups)
+        }
+        return configured | {
+            role_id
+            for function_key in managed_functions
+            for role_id in self._managed_role_ids[function_key]
+        }
+
+    async def _reload_managed_role_mappings(self) -> None:
+        """Load Discord-managed roles once at startup and after each mapping change."""
+        mappings = await self.store.list_discord_role_mappings()
+        self._managed_role_ids = {function_key: set() for function_key in ROLE_MAPPING_LABELS}
+        for mapping in mappings:
+            if mapping.function_key in self._managed_role_ids:
+                self._managed_role_ids[mapping.function_key].add(mapping.role_id)
 
     def _can_close_ticket(self, interaction: discord.Interaction, submission: Submission) -> bool:
         """Allow the requester, judicial/AG staff, or a server administrator to close a request."""
@@ -364,6 +424,7 @@ class NerpFormsBot(discord.Client):
             "judges",
             "judges_office",
             "senior_judges",
+            "high_command",
             "high_command_doj",
             "paralegals",
             "attorney_general",
@@ -902,6 +963,7 @@ class NerpFormsBot(discord.Client):
     async def setup_hook(self) -> None:
         await self.store.initialize()
         self._direct_bot_administrator_ids = await self.store.get_bot_admin_user_ids()
+        await self._reload_managed_role_mappings()
         guild = discord.Object(id=self.environment.guild.id)
         # Guild commands update immediately during development.  Clearing the scoped
         # tree first also replaces any stale command schema that Discord retained
@@ -1039,6 +1101,117 @@ class NerpFormsBot(discord.Client):
             await interaction.response.send_message(
                 "**Direct NERP bot administrators**\n" + "\n".join(lines), ephemeral=True
             )
+
+        role_mapping = app_commands.Group(
+            name="role-mapping",
+            description="Map existing Discord roles to NERP staff functions.",
+        )
+        self.tree.add_command(role_mapping, guild=guild)
+        role_mapping_choices = [
+            app_commands.Choice(name=label, value=function_key)
+            for function_key, label in ROLE_MAPPING_LABELS.items()
+        ]
+
+        @role_mapping.command(
+            name="add",
+            description="Allow an existing Discord role to use a NERP staff function.",
+        )
+        @app_commands.describe(
+            function="The NERP staff function to configure.",
+            role="An existing Discord role. Its name does not need to match the function name.",
+        )
+        @app_commands.choices(function=role_mapping_choices)
+        async def role_mapping_add(
+            interaction: discord.Interaction,
+            function: app_commands.Choice[str],
+            role: discord.Role,
+        ) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only the server owner or an existing bot administrator can manage role mappings.",
+                    ephemeral=True,
+                )
+                return
+            if role.guild.id != interaction.guild_id or role.is_default() or role.managed:
+                await interaction.response.send_message(
+                    "Choose a normal staff role from this Discord server; @everyone and integration-managed roles cannot be mapped.",
+                    ephemeral=True,
+                )
+                return
+            added = await self.store.add_discord_role_mapping(
+                function_key=function.value,
+                role_id=role.id,
+                added_by_user_id=interaction.user.id,
+                added_by_name=interaction.user.display_name,
+                added_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
+            )
+            if not added:
+                await interaction.response.send_message(
+                    f"{role.mention} is already mapped to **{function.name}**.", ephemeral=True
+                )
+                return
+            self._managed_role_ids[function.value].add(role.id)
+            await interaction.response.send_message(
+                f"Mapped {role.mention} to **{function.name}**. The change is active immediately and survives bot restarts.",
+                ephemeral=True,
+            )
+
+        @role_mapping.command(
+            name="remove",
+            description="Remove a Discord-managed NERP staff-function mapping.",
+        )
+        @app_commands.describe(function="The NERP staff function to change.", role="The mapped Discord role to remove.")
+        @app_commands.choices(function=role_mapping_choices)
+        async def role_mapping_remove(
+            interaction: discord.Interaction,
+            function: app_commands.Choice[str],
+            role: discord.Role,
+        ) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only the server owner or an existing bot administrator can manage role mappings.",
+                    ephemeral=True,
+                )
+                return
+            removed = await self.store.remove_discord_role_mapping(
+                function_key=function.value, role_id=role.id
+            )
+            if not removed:
+                await interaction.response.send_message(
+                    f"{role.mention} does not have a Discord-managed **{function.name}** mapping.",
+                    ephemeral=True,
+                )
+                return
+            self._managed_role_ids[function.value].discard(role.id)
+            await interaction.response.send_message(
+                f"Removed {role.mention} from **{function.name}**. Any recovery role configured in `master.yaml` remains unchanged.",
+                ephemeral=True,
+            )
+
+        @role_mapping.command(
+            name="list",
+            description="Privately show all Discord-managed NERP staff-role mappings.",
+        )
+        async def role_mapping_list(interaction: discord.Interaction) -> None:
+            if not self._is_administrator(interaction):
+                await interaction.response.send_message(
+                    "Only the server owner or an existing bot administrator can view role mappings.",
+                    ephemeral=True,
+                )
+                return
+            embed = discord.Embed(
+                title="NERP role mappings",
+                description=(
+                    "These Discord-managed mappings take effect immediately. Private configuration roles remain "
+                    "available only as recovery fallbacks."
+                ),
+                color=discord.Color.blurple(),
+            )
+            for function_key, label in ROLE_MAPPING_LABELS.items():
+                role_ids = self._managed_role_ids[function_key]
+                value = "\n".join(f"• <@&{role_id}>" for role_id in sorted(role_ids)) or "Unassigned"
+                embed.add_field(name=label, value=value, inline=True)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
         service_desk = app_commands.Group(
             name="service-desk",

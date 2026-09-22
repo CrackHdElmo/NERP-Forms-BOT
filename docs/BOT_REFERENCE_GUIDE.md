@@ -109,6 +109,30 @@ contain your existing LSPD, Sheriff, FIB, or other law-enforcement role IDs; a r
 | `/transfer-case-assignment` | Current assignee, DOJ/PD Command, or administrator | Offers a selected role slot to another eligible staff member. The assignment does not change yet. |
 | `/accept-case-transfer` | Named eligible transfer recipient | Accepts the pending transfer in the same ticket or Docket post and records the reassignment. |
 
+## Role mapping
+
+The bot does not require a Discord role to have the same name as a NERP function. A Bot
+Administrator can map existing server roles to the functions below; changes apply immediately and
+persist after the bot restarts.
+
+| Command | What it does |
+| --- | --- |
+| `/role-mapping add` | Adds one existing Discord role to Bot Administrator, High Command, Attorney General, Judge, Prosecution, Defense Attorney, or LEO / PD Officer. |
+| `/role-mapping remove` | Removes one Discord-managed mapping from the selected function. |
+| `/role-mapping list` | Privately displays the current Discord-managed mappings. |
+
+For example, map the existing `LSPD`, `Sheriff`, or `FIB` Discord role to **LEO / PD Officer**.
+Those members can then self-assign or be assigned to PD Officer case slots. The private
+`config/master.yaml` role lists are recovery fallbacks and remain unaffected by `/role-mapping remove`.
+
+## Guided resource setup
+
+`/setup-workflow` is the administrator-only creation wizard for Court Administration, Off-Docket
+Court Orders, Attorney Requests, and Business Licensing. After choosing a workflow preset, it asks
+for each category, text-channel, and Forum name required by that preset. Suggested NERP names are
+pre-filled, but administrators may replace them. The bot then displays a private preview and creates
+or reuses the named Discord resources only after **Confirm setup** is selected.
+
 ## Service Desk administrator guide
 
 `#service-desk` should remain read-only for regular members. It is the central, bot-managed
