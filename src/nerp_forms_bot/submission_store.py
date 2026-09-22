@@ -489,21 +489,37 @@ class SubmissionStore:
         return cursor.rowcount == 1
 
     async def get_by_channel_id(self, channel_id: int) -> Submission | None:
-        """Find a request from its private ticket or its linked, still-active Docket Forum post."""
+        """Find the record owned by a ticket or Forum post.
+
+        A Docket Forum post can contain one or more imported Court Orders.  The
+        Docket itself must win when its thread is queried; otherwise actions
+        such as closing the Docket can accidentally operate on an imported
+        Court Order.  The merge lookup remains as a fallback for Court Order
+        commands intentionally run from the linked Docket.
+        """
         async with aiosqlite.connect(self.path) as database:
             database.row_factory = aiosqlite.Row
             cursor = await database.execute(
                 """
-                SELECT submissions.* FROM submissions
-                LEFT JOIN court_order_docket_merges
-                    ON court_order_docket_merges.submission_id = submissions.id
-                WHERE submissions.discord_channel_id = ?
-                   OR court_order_docket_merges.docket_thread_id = ?
+                SELECT * FROM submissions
+                WHERE discord_channel_id = ?
                 ORDER BY submissions.id DESC LIMIT 1
                 """,
-                (channel_id, channel_id),
+                (channel_id,),
             )
             row = await cursor.fetchone()
+            if row is None:
+                cursor = await database.execute(
+                    """
+                    SELECT submissions.* FROM submissions
+                    INNER JOIN court_order_docket_merges
+                        ON court_order_docket_merges.submission_id = submissions.id
+                    WHERE court_order_docket_merges.docket_thread_id = ?
+                    ORDER BY submissions.id DESC LIMIT 1
+                    """,
+                    (channel_id,),
+                )
+                row = await cursor.fetchone()
         return self._submission_from_row(row) if row else None
 
     async def find_open_submissions(self, workflow: str) -> list[Submission]:

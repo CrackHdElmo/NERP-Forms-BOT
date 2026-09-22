@@ -574,3 +574,42 @@ def test_court_order_docket_merge_tracks_its_destination_and_sync_checkpoint(tmp
     assert merge.source_closed is True
     assert linked_submission is not None
     assert linked_submission.request_id == "COR-000001"
+
+
+def test_docket_thread_resolution_prefers_its_docket_over_an_imported_court_order(tmp_path) -> None:
+    async def exercise() -> object:
+        store = SubmissionStore(f"sqlite+aiosqlite:///{tmp_path / 'tracker.db'}")
+        await store.initialize()
+        court_order = await store.begin_submission(
+            source_key="sheet:court-order",
+            workflow="court_order",
+            requester_username="requester",
+            payload={},
+        )
+        docket = await store.begin_submission(
+            source_key="sheet:docket",
+            workflow="new_docket",
+            requester_username="requester",
+            payload={},
+            request_prefix="DCK",
+        )
+        assert court_order is not None
+        assert docket is not None
+        await store.mark_ticket_created(court_order.id, 100, None, None)
+        await store.mark_ticket_created(docket.id, 200, None, None, status="pending_review")
+        await store.record_court_order_docket_merge(
+            submission_id=court_order.id,
+            docket_thread_id=200,
+            merged_by_user_id=42,
+            merged_by_name="Judge Example",
+            merged_at="2026-09-22T12:00:00+00:00",
+            last_forwarded_message_id=300,
+            source_closed=False,
+        )
+        return await store.get_by_channel_id(200)
+
+    resolved = asyncio.run(exercise())
+
+    assert resolved is not None
+    assert resolved.request_id == "DCK-000002"
+    assert resolved.workflow == "new_docket"
