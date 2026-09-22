@@ -14,6 +14,14 @@ from googleapiclient.http import MediaIoBaseDownload
 from pypdf import PdfReader
 
 TRACKER_TITLE = "NERP - Case Management - Requests"
+FORM_RESPONSE_ARCHIVE_SHEET_TITLE = "Archived Responses"
+FORM_RESPONSE_ARCHIVE_STATUS_HEADER = "NERP Archive Status"
+FORM_RESPONSE_ARCHIVE_HEADERS = [
+    "Archived At (UTC)",
+    "Request ID",
+    "Closed By",
+    "Closure Note",
+]
 SHEET_HEADERS = [
     "Request ID",
     "Submission ID",
@@ -179,6 +187,147 @@ class GoogleWorkspaceService:
             rows.append(row)
         return rows
 
+    def archive_form_response_row(
+        self,
+        *,
+        spreadsheet_id: str,
+        sheet_name: str,
+        source_row: int,
+        request_id: str,
+        closed_by: str,
+        closed_at: str,
+        closure_note: str | None,
+    ) -> bool:
+        """Copy one closed Form response to the archive and suppress it from future intake.
+
+        Google Forms prevents deleting rows or columns that contain Form-owned
+        response data.  The source row is therefore retained in place, marked
+        ``Archived`` in a bot-owned status column, and hidden.  This keeps the
+        Form integration healthy while making the active response view clean and
+        ensuring a fresh bot database cannot recreate the closed Discord ticket.
+
+        The archive append is idempotent by request ID so a retry after a partial
+        Discord closure cannot create a duplicate archive record.
+        """
+        if source_row < 2:
+            raise ValueError("A Form response row must be row 2 or later.")
+
+        sheets = self._sheets_service()
+        source_range = f"'{sheet_name}'!A:ZZ"
+        source_values = sheets.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=source_range,
+        ).execute().get("values", [])
+        if not source_values or source_row > len(source_values):
+            raise ValueError("The original Form response row could not be found for archival.")
+
+        headers = [str(value).strip() for value in source_values[0]]
+        source_values_row = source_values[source_row - 1]
+        if not any(source_values_row):
+            raise ValueError("The original Form response row is blank and cannot be archived.")
+        source_values_row = [
+            str(source_values_row[index]).strip() if index < len(source_values_row) else ""
+            for index in range(len(headers))
+        ]
+
+        metadata = sheets.spreadsheets().get(
+            spreadsheetId=spreadsheet_id,
+            fields="sheets.properties",
+        ).execute()
+        sheet_properties = [item["properties"] for item in metadata.get("sheets", [])]
+        source_properties = next(
+            (item for item in sheet_properties if item.get("title") == sheet_name),
+            None,
+        )
+        if not source_properties:
+            raise ValueError("The configured Form response sheet could not be found for archival.")
+        archive_properties = next(
+            (item for item in sheet_properties if item.get("title") == FORM_RESPONSE_ARCHIVE_SHEET_TITLE),
+            None,
+        )
+        if not archive_properties:
+            sheets.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={
+                    "requests": [
+                        {
+                            "addSheet": {
+                                "properties": {
+                                    "title": FORM_RESPONSE_ARCHIVE_SHEET_TITLE,
+                                    "gridProperties": {"frozenRowCount": 1},
+                                }
+                            }
+                        }
+                    ]
+                },
+            ).execute()
+            sheets.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{FORM_RESPONSE_ARCHIVE_SHEET_TITLE}'!A1:ZZ1",
+                valueInputOption="RAW",
+                body={"values": [FORM_RESPONSE_ARCHIVE_HEADERS + headers]},
+            ).execute()
+
+        archived_ids = sheets.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{FORM_RESPONSE_ARCHIVE_SHEET_TITLE}'!B2:B",
+        ).execute().get("values", [])
+        already_archived = any(
+            row and str(row[0]).strip().upper() == request_id.upper() for row in archived_ids
+        )
+        if not already_archived:
+            sheets.spreadsheets().values().append(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{FORM_RESPONSE_ARCHIVE_SHEET_TITLE}'!A:ZZ",
+                valueInputOption="RAW",
+                insertDataOption="INSERT_ROWS",
+                body={
+                    "values": [
+                        [closed_at, request_id, closed_by, closure_note or ""] + source_values_row
+                    ]
+                },
+            ).execute()
+
+        try:
+            archive_status_index = headers.index(FORM_RESPONSE_ARCHIVE_STATUS_HEADER)
+        except ValueError:
+            archive_status_index = len(headers)
+            headers.append(FORM_RESPONSE_ARCHIVE_STATUS_HEADER)
+            column = self._column_letter(archive_status_index + 1)
+            sheets.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{sheet_name}'!{column}1",
+                valueInputOption="RAW",
+                body={"values": [[FORM_RESPONSE_ARCHIVE_STATUS_HEADER]]},
+            ).execute()
+        status_column = self._column_letter(archive_status_index + 1)
+        sheets.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_name}'!{status_column}{source_row}",
+            valueInputOption="RAW",
+            body={"values": [["Archived"]]},
+        ).execute()
+        sheets.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={
+                "requests": [
+                    {
+                        "updateDimensionProperties": {
+                            "range": {
+                                "sheetId": source_properties["sheetId"],
+                                "dimension": "ROWS",
+                                "startIndex": source_row - 1,
+                                "endIndex": source_row,
+                            },
+                            "properties": {"hiddenByUser": True},
+                            "fields": "hiddenByUser",
+                        }
+                    }
+                ]
+            },
+        ).execute()
+        return not already_archived
+
     def append_tracking_row(
         self,
         *,
@@ -338,6 +487,17 @@ class GoogleWorkspaceService:
                 "https://www.googleapis.com/auth/documents",
             ],
         )
+
+    @staticmethod
+    def _column_letter(column_number: int) -> str:
+        """Convert a one-based Sheet column number to A1 notation."""
+        if column_number < 1:
+            raise ValueError("A Sheet column number must be positive.")
+        result = ""
+        while column_number:
+            column_number, remainder = divmod(column_number - 1, 26)
+            result = chr(ord("A") + remainder) + result
+        return result
 
     @staticmethod
     def _answer(payload: dict[str, str], *names: str) -> str:

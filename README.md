@@ -110,6 +110,12 @@ Form-submitted evidence links and any recorded approval or denial identity/notes
 removes the source private ticket. A tracked Forum/Docket post is archived and locked instead
 of deleted so the shared docket record remains intact.
 
+Every successful closure also creates a durable **Archived Responses** record in the linked
+Google response spreadsheet. The original Google Forms row is marked `Archived` and hidden,
+rather than deleted, because Forms protects response data and relies on stable row positions.
+The bot ignores marked rows during future automatic syncs, including after a database rebuild or
+new deployment, so an already closed case cannot be recreated as a new Discord ticket.
+
 Within a Court Order ticket, a configured Judge or bot administrator can use
 `/deny-arrest-warrant` with required denial notes. The denial, issuing official, and timestamp
 are retained. The ticket deliberately stays open so the requester can submit a corrected Form;

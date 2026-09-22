@@ -441,7 +441,10 @@ Run these checks in the deployment Discord server:
     administrator. Confirm the staff-only `#doj-case-records` embed includes
     all subject summaries, probable cause, evidence links, judicial history,
     closer, and closure note; then confirm the private source ticket was
-    deleted.
+    deleted. Confirm a new **Archived Responses** tab now contains the closed
+    response and that its original Form Responses row is marked `Archived` and
+    hidden. This archive marker prevents the response from being recreated if
+    the bot database is replaced or the bot is deployed again.
 
 Use `/court-order-baseline` only when intentionally telling the bot to mark
 existing response rows as already seen. It is useful before enabling a new

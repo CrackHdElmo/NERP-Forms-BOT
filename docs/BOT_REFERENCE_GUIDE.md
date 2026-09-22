@@ -58,7 +58,7 @@ cannot safely produce a one-page document.
 | `/generate-arrest-warrant` | Claimed Arrest Warrant ticket | Verified requester or bot administrator | Creates the proposed one-page Arrest Warrant PNG and internal document record. |
 | `/generate-search-seizure-warrant` | Claimed Search / Seizure ticket | Verified requester or bot administrator | Creates the proposed one-page Search / Seizure Warrant PNG and internal document record. |
 | `/generate-subpoena` | Claimed Subpoena ticket | Verified requester or bot administrator | Creates the proposed one-page Subpoena PNG and internal document record. |
-| `/close-ticket` | The active ticket or Docket post | Requester, Judge, Attorney General, or administrator when authorized | Posts the required staff closure record, then closes the private ticket or archives/locks the Docket post. |
+| `/close-ticket` | The active ticket or Docket post | Requester, Judge, Attorney General, or administrator when authorized | Posts the required staff closure record, copies the Form response to **Archived Responses**, marks and hides the original response row, then closes the private ticket or archives/locks the Docket post. |
 
 ## Court Order and judicial commands
 

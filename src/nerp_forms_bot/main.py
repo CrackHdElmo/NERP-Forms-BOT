@@ -16,7 +16,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .config import EnvironmentConfig, load_environment, load_master_deployment
 from .fivemanage import FiveManageService
-from .google_workspace import GeneratedWarrant, GoogleWorkspaceService, TrackingRow
+from .google_workspace import (
+    FORM_RESPONSE_ARCHIVE_STATUS_HEADER,
+    GeneratedWarrant,
+    GoogleWorkspaceService,
+    TrackingRow,
+)
 from .submission_store import Submission, SubmissionStore
 
 LOGGER = logging.getLogger(__name__)
@@ -2089,6 +2094,12 @@ class NerpFormsBot(discord.Client):
                     source_deleted=isinstance(interaction.channel, discord.TextChannel),
                 ):
                     await records_channel.send(embed=record_embed)
+                await self._archive_closed_form_response(
+                    submission=submission,
+                    closed_by=closer_name,
+                    closed_at=closed_at,
+                    closure_note=closure_note,
+                )
                 recorded = await self.store.mark_closed(
                     submission_id=submission.id,
                     closer_user_id=interaction.user.id,
@@ -2887,6 +2898,8 @@ class NerpFormsBot(discord.Client):
         workspace, rows = await self._get_court_order_rows()
         created = 0
         for row in rows:
+            if self._is_archived_form_response(row):
+                continue
             source_key = f"{intake.response_spreadsheet_id}:{row['_source_row']}"
             username = self._normalize_username(
                 self._answer(row, "Discord Username", "Your Discord Name")
@@ -3048,6 +3061,45 @@ class NerpFormsBot(discord.Client):
             intake.response_sheet_name,
         )
         return workspace, rows
+
+    async def _archive_closed_form_response(
+        self,
+        *,
+        submission: Submission,
+        closed_by: str,
+        closed_at: str,
+        closure_note: str | None,
+    ) -> None:
+        """Archive a Form-originated ticket without destabilizing Google Forms row IDs."""
+        intake = self.environment.court_order_intake
+        if not intake or not self.settings.google_service_account_file:
+            raise RuntimeError("The Form response archive is not configured on this host.")
+        spreadsheet_id, separator, row_value = submission.source_key.rpartition(":")
+        if not separator or spreadsheet_id != intake.response_spreadsheet_id:
+            raise RuntimeError("The request does not have a valid Form response reference for archival.")
+        try:
+            source_row = int(row_value)
+        except ValueError as error:
+            raise RuntimeError("The request does not have a valid Form response row for archival.") from error
+        workspace = GoogleWorkspaceService(
+            self.settings.google_service_account_file,
+            self.environment.google_workspace.drive_folder_id or "",
+        )
+        await asyncio.to_thread(
+            workspace.archive_form_response_row,
+            spreadsheet_id=intake.response_spreadsheet_id,
+            sheet_name=intake.response_sheet_name,
+            source_row=source_row,
+            request_id=submission.request_id,
+            closed_by=closed_by,
+            closed_at=closed_at,
+            closure_note=closure_note,
+        )
+
+    @staticmethod
+    def _is_archived_form_response(row: dict[str, str]) -> bool:
+        """Keep closed records out of intake even if the local database is recreated."""
+        return row.get(FORM_RESPONSE_ARCHIVE_STATUS_HEADER, "").strip().casefold() == "archived"
 
     @classmethod
     def _is_new_docket_case_row(cls, payload: dict[str, str]) -> bool:
